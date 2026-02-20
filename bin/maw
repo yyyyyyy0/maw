@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MAW_VERSION="0.1.0"
+MAW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LIB_DIR="${MAW_DIR}/lib"
+
+# shellcheck source=lib/core.sh
+source "${LIB_DIR}/core.sh"
+
+usage() {
+  cat <<EOF
+maw - Multi-Agent Workspace manager v${MAW_VERSION}
+
+Usage: maw <command> [options]
+
+Commands:
+  init                    プロジェクトを maw 用に初期化
+  spawn <name> [options]  新しいワークスペースを作成
+  list                    ワークスペース一覧を表示
+  cleanup [name|options]  ワークスペースを削除
+  doctor                  環境の整合性チェック
+
+Options:
+  -h, --help              ヘルプを表示
+  -v, --version           バージョンを表示
+
+詳細: https://github.com/yyyyyyy0/maw
+EOF
+}
+
+check_dependencies() {
+  local missing=()
+
+  if ! command -v git &>/dev/null; then
+    missing+=("git")
+  fi
+
+  if ! command -v jq &>/dev/null; then
+    missing+=("jq")
+  fi
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    log_error "必須ツールが見つかりません: ${missing[*]}"
+    log_error "インストールしてください:"
+    for tool in "${missing[@]}"; do
+      case "$tool" in
+        jq)  log_error "  macOS: brew install jq  /  Linux: apt install jq" ;;
+        git) log_error "  macOS: xcode-select --install  /  Linux: apt install git" ;;
+      esac
+    done
+    exit 1
+  fi
+}
+
+main() {
+  if [[ $# -eq 0 ]]; then
+    usage
+    exit 0
+  fi
+
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -v|--version)
+      echo "maw v${MAW_VERSION}"
+      exit 0
+      ;;
+    init|spawn|list|cleanup|doctor)
+      check_dependencies
+      local cmd="$1"
+      shift
+      source "${LIB_DIR}/${cmd}.sh"
+      "cmd_${cmd}" "$@"
+      ;;
+    *)
+      log_error "不明なコマンド: $1"
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
