@@ -104,6 +104,67 @@ maw cleanup --merged       # マージ済みのみ
 maw cleanup --all --dry-run  # 削除対象を確認のみ
 ```
 
+### `maw status`
+
+ワークスペース状況とファイル排他情報を一括表示します。
+
+```
+=== Workspaces ===
+     NAME             BRANCH                         AGENT      ISSUE    CREATED
+  ------------------------------------------------------------------------------------------------
+  -> feature-auth     claude/feature-auth            claude     42       2026-02-20
+     bugfix-login     issue/99-bugfix-login          -          99       2026-02-20
+
+=== Claims ===
+  FILE                           WORKSPACE        AGENT      CLAIMED
+  --------------------------------------------------------------------------
+  src/auth.ts                    feature-auth     claude     2026-02-20
+```
+
+- 現在のワークスペースを `->` でハイライト
+- 排他宣言 (claims) の一覧を表示
+
+### `maw claim <file|dir> [--workspace <name>]`
+
+ファイルまたはディレクトリの排他宣言を行います。
+
+```bash
+maw claim src/auth.ts                         # 自動検出 WS で claim
+maw claim src/components/ --workspace ws1     # ディレクトリごと claim
+```
+
+**排他チェック**:
+- 同じファイルが他 WS に claim 済み → エラー
+- ディレクトリ配下に他 WS の claim がある → エラー
+- ファイルが他 WS の claim ディレクトリ配下 → エラー
+- 同一 WS の再 claim は冪等 (更新)
+
+### `maw unclaim <file|dir> [--workspace <name>] [--force]`
+
+排他宣言を解除します。
+
+```bash
+maw unclaim src/auth.ts               # 自分の claim を解除
+maw unclaim src/auth.ts --force       # 他 WS の claim も強制解除
+```
+
+### `maw handover [--workspace <name>]`
+
+引き継ぎドキュメントを `.maw/handovers/ws-{name}.md` に生成します。
+
+```bash
+maw handover                          # 現在の WS (自動検出)
+maw handover --workspace feature-auth # WS 指定
+```
+
+生成内容:
+- ブランチ情報、エージェント、Issue
+- コミット履歴 (`git log --oneline`)
+- 変更ファイル (`git diff --name-status`)
+- 未コミット変更 (`git status --short`)
+- 当該 WS の claims 一覧
+- 引き継ぎメモ (プレースホルダー)
+
 ### `maw doctor [--fix]`
 
 環境の整合性をチェックします。
@@ -111,6 +172,7 @@ maw cleanup --all --dry-run  # 削除対象を確認のみ
 - orphaned worktree の検出
 - symlink の整合性チェック
 - lockfile hash の一致確認
+- claims の整合性チェック (orphan claim 検出)
 - `--fix` で自動修復
 
 ## プロジェクト構成
@@ -121,7 +183,9 @@ project/
 │   ├── config.json               # プロジェクト設定
 │   ├── state.json                # ワークスペース状態
 │   ├── claims.json               # ファイル排他宣言
-│   └── lockfile-hash             # lockfile の SHA-256
+│   ├── lockfile-hash             # lockfile の SHA-256
+│   └── handovers/                # 引き継ぎドキュメント
+│       └── ws-{name}.md
 ├── .maw-workspaces/              # worktree 配置先 (gitignored)
 │   ├── agent-a/
 │   │   ├── node_modules -> ../../node_modules  # symlink
@@ -159,7 +223,7 @@ project/
 ## ロードマップ
 
 - [x] Phase 1: 基盤 (worktree + symlink + CLI)
-- [ ] Phase 2: コンテキスト共有 (claim, handover, status)
+- [x] Phase 2: コンテキスト共有 (claim, handover, status)
 - [ ] Phase 3: マージとライフサイクル
 - [ ] Phase 4: 拡張 (補完, CoW clone, 多言語対応, CI/CD)
 

@@ -273,3 +273,249 @@ teardown() {
   ws="$(jq -r '.workspaces["test-ws"]' .maw/state.json)"
   [ "$ws" = "null" ]
 }
+
+# ===== maw status =====
+
+@test "maw status はワークスペース一覧を表示する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" spawn ws2
+  run "$MAW_BIN" status
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Workspaces" ]]
+  [[ "$output" =~ "ws1" ]]
+  [[ "$output" =~ "ws2" ]]
+}
+
+@test "maw status でワークスペースなしのメッセージが表示される" {
+  "$MAW_BIN" init
+  run "$MAW_BIN" status
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "ワークスペースがありません" ]]
+}
+
+@test "maw status は claims セクションを表示する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  # WS 内から claim 実行
+  cd ".maw-workspaces/ws1"
+  "$MAW_BIN" claim src/auth.ts
+  cd "$TEST_DIR"
+  run "$MAW_BIN" status
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Claims" ]]
+  [[ "$output" =~ "src/auth.ts" ]]
+}
+
+@test "maw status で claims なしのメッセージが表示される" {
+  "$MAW_BIN" init
+  run "$MAW_BIN" status
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "排他宣言はありません" ]]
+}
+
+# ===== maw claim =====
+
+@test "maw claim でファイルを claim できる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  cd ".maw-workspaces/ws1"
+  run "$MAW_BIN" claim src/auth.ts
+  [ "$status" -eq 0 ]
+  cd "$TEST_DIR"
+  local claimed_ws
+  claimed_ws="$(jq -r '.claims["src/auth.ts"].workspace' .maw/claims.json)"
+  [ "$claimed_ws" = "ws1" ]
+}
+
+@test "maw claim --workspace でワークスペースを指定できる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  run "$MAW_BIN" claim src/auth.ts --workspace ws1
+  [ "$status" -eq 0 ]
+  local claimed_ws
+  claimed_ws="$(jq -r '.claims["src/auth.ts"].workspace' .maw/claims.json)"
+  [ "$claimed_ws" = "ws1" ]
+}
+
+@test "maw claim で他 WS の claim と競合するとエラー" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" spawn ws2 --agent codex
+  "$MAW_BIN" claim src/auth.ts --workspace ws1
+  run "$MAW_BIN" claim src/auth.ts --workspace ws2
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "排他競合" ]]
+}
+
+@test "maw claim で同一 WS の再 claim は冪等 (更新)" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1
+  run "$MAW_BIN" claim src/auth.ts --workspace ws1
+  [ "$status" -eq 0 ]
+  local count
+  count="$(jq '.claims | length' .maw/claims.json)"
+  [ "$count" -eq 1 ]
+}
+
+@test "maw claim で対象未指定はエラー" {
+  "$MAW_BIN" init
+  run "$MAW_BIN" claim
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "claim 対象を指定" ]]
+}
+
+@test "maw claim でディレクトリを claim できる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  run "$MAW_BIN" claim src/components/ --workspace ws1
+  [ "$status" -eq 0 ]
+  local claimed_ws
+  claimed_ws="$(jq -r '.claims["src/components/"].workspace' .maw/claims.json)"
+  [ "$claimed_ws" = "ws1" ]
+}
+
+@test "maw claim でディレクトリ配下のファイルが他 WS に claim 済みだと競合" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" spawn ws2 --agent codex
+  "$MAW_BIN" claim src/components/Button.tsx --workspace ws1
+  run "$MAW_BIN" claim src/components/ --workspace ws2
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "排他競合" ]]
+}
+
+# ===== maw unclaim =====
+
+@test "maw unclaim で claim を解除できる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1
+  cd ".maw-workspaces/ws1"
+  run "$MAW_BIN" unclaim src/auth.ts
+  [ "$status" -eq 0 ]
+  cd "$TEST_DIR"
+  local count
+  count="$(jq '.claims | length' .maw/claims.json)"
+  [ "$count" -eq 0 ]
+}
+
+@test "maw unclaim で他 WS の claim はエラー" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" spawn ws2 --agent codex
+  "$MAW_BIN" claim src/auth.ts --workspace ws1
+  cd ".maw-workspaces/ws2"
+  run "$MAW_BIN" unclaim src/auth.ts
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "別のワークスペース" ]]
+}
+
+@test "maw unclaim --force で他 WS の claim を強制解除できる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" spawn ws2 --agent codex
+  "$MAW_BIN" claim src/auth.ts --workspace ws1
+  run "$MAW_BIN" unclaim src/auth.ts --workspace ws2 --force
+  [ "$status" -eq 0 ]
+  local count
+  count="$(jq '.claims | length' .maw/claims.json)"
+  [ "$count" -eq 0 ]
+}
+
+@test "maw unclaim で存在しない claim はエラー" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  cd ".maw-workspaces/ws1"
+  run "$MAW_BIN" unclaim nonexistent.ts
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "claim が見つかりません" ]]
+}
+
+# ===== maw handover =====
+
+@test "maw handover でドキュメントが生成される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude --issue 42
+  run "$MAW_BIN" handover --workspace ws1
+  [ "$status" -eq 0 ]
+  [ -f ".maw/handovers/ws-ws1.md" ]
+}
+
+@test "maw handover にブランチ情報が含まれる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  grep -q "ブランチ" .maw/handovers/ws-ws1.md
+  grep -q "claude/ws1" .maw/handovers/ws-ws1.md
+}
+
+@test "maw handover にコミット履歴セクションが含まれる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  grep -q "コミット履歴" .maw/handovers/ws-ws1.md
+}
+
+@test "maw handover に claims が含まれる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1
+  "$MAW_BIN" handover --workspace ws1
+  grep -q "src/auth.ts" .maw/handovers/ws-ws1.md
+}
+
+@test "maw handover で WS 未指定かつ検出不可ならエラー" {
+  "$MAW_BIN" init
+  run "$MAW_BIN" handover
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "ワークスペースを検出できません" ]]
+}
+
+# ===== cleanup 連動 =====
+
+@test "maw cleanup で claims も連動削除される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1
+  "$MAW_BIN" claim src/db.ts --workspace ws1
+  # cleanup 実行
+  "$MAW_BIN" cleanup ws1
+  local count
+  count="$(jq '.claims | length' .maw/claims.json)"
+  [ "$count" -eq 0 ]
+}
+
+# ===== doctor claims =====
+
+@test "maw doctor は orphan claims を検出する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1
+  # state から WS を手動削除 (orphan claim 作成)
+  rm -rf ".maw-workspaces/ws1"
+  git worktree prune
+  local state
+  state="$(jq 'del(.workspaces["ws1"])' .maw/state.json)"
+  echo "$state" > .maw/state.json
+  run "$MAW_BIN" doctor
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "orphan claim" ]]
+}
+
+@test "maw doctor --fix は orphan claims を削除する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1
+  rm -rf ".maw-workspaces/ws1"
+  git worktree prune
+  local state
+  state="$(jq 'del(.workspaces["ws1"])' .maw/state.json)"
+  echo "$state" > .maw/state.json
+  run "$MAW_BIN" doctor --fix
+  [ "$status" -eq 0 ]
+  local count
+  count="$(jq '.claims | length' .maw/claims.json)"
+  [ "$count" -eq 0 ]
+}

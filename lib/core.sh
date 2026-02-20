@@ -206,3 +206,54 @@ is_branch_merged() {
 
   git branch --merged "$base" 2>/dev/null | grep -qw "$branch"
 }
+
+# claims.json を読み取り
+read_claims() {
+  local root="$1"
+  cat "${root}/${MAW_CLAIMS_FILE}" 2>/dev/null || echo '{"claims":{}}'
+}
+
+# claims.json を書き込み
+write_claims() {
+  local root="$1"
+  local data="$2"
+  echo "$data" | jq '.' > "${root}/${MAW_CLAIMS_FILE}"
+}
+
+# cwd から所属ワークスペース名を自動検出
+detect_current_workspace() {
+  local root="$1"
+  local cwd="$PWD"
+  local ws_base="${root}/${MAW_WORKSPACES_DIR}"
+
+  # cwd が ws_base 配下にあるか確認
+  if [[ "$cwd" == "${ws_base}/"* ]]; then
+    local rel="${cwd#${ws_base}/}"
+    # 最初の / より前がワークスペース名
+    echo "${rel%%/*}"
+    return 0
+  fi
+
+  return 1
+}
+
+# パス正規化 (絶対→相対、./ 除去、末尾 / 保持)
+normalize_claim_path() {
+  local root="$1"
+  local input="$2"
+
+  local result="$input"
+
+  # 絶対パスなら root からの相対パスに変換
+  if [[ "$result" == /* ]]; then
+    result="${result#${root}/}"
+  fi
+
+  # ./ プレフィックス除去
+  result="${result#./}"
+
+  # 先頭の / を除去 (安全策)
+  result="${result#/}"
+
+  echo "$result"
+}

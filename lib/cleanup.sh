@@ -106,6 +106,13 @@ cmd_cleanup() {
     # handover 削除
     rm -f "${root}/${MAW_HANDOVERS_DIR}/ws-${name}.md"
 
+    # claims 連動削除 (当該 WS の全 claim を解除)
+    local claims
+    claims="$(read_claims "$root")"
+    claims="$(echo "$claims" | jq --arg ws "$name" \
+      '.claims |= with_entries(select(.value.workspace != $ws))')"
+    write_claims "$root" "$claims"
+
     # state 更新
     remove_workspace_state "$root" "$name"
 

@@ -171,6 +171,39 @@ cmd_doctor() {
     fi
   fi
 
+  # 5. claims 整合性チェック
+  echo ""
+  echo "=== Claims 整合性 ==="
+  local claims
+  claims="$(read_claims "$root")"
+  state="$(read_state "$root")"
+
+  local orphan_claims=()
+  while IFS= read -r claim_ws; do
+    [[ -z "$claim_ws" ]] && continue
+    if ! echo "$state" | jq -e --arg name "$claim_ws" '.workspaces[$name]' &>/dev/null; then
+      orphan_claims+=("$claim_ws")
+    fi
+  done < <(echo "$claims" | jq -r '.claims[].workspace' 2>/dev/null | sort -u)
+
+  if [[ ${#orphan_claims[@]} -gt 0 ]]; then
+    for ows in "${orphan_claims[@]}"; do
+      log_warn "orphan claim: ワークスペース '${ows}' は存在しません"
+      ((issues++)) || true
+    done
+    if [[ "$fix" == true ]]; then
+      for ows in "${orphan_claims[@]}"; do
+        claims="$(echo "$claims" | jq --arg ws "$ows" \
+          '.claims |= with_entries(select(.value.workspace != $ws))')"
+      done
+      write_claims "$root" "$claims"
+      log_success "  -> orphan claims を削除しました"
+      ((fixed++)) || true
+    fi
+  else
+    log_success "claims: 整合性OK"
+  fi
+
   # サマリー
   echo ""
   echo "=== サマリー ==="
