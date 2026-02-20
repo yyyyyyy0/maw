@@ -2,7 +2,16 @@
 set -euo pipefail
 
 MAW_VERSION="0.1.0"
-MAW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# symlink を解決して実体のパスを取得
+MAW_SCRIPT="${BASH_SOURCE[0]}"
+while [[ -L "$MAW_SCRIPT" ]]; do
+  MAW_SCRIPT_DIR="$(cd "$(dirname "$MAW_SCRIPT")" && pwd)"
+  MAW_SCRIPT="$(readlink "$MAW_SCRIPT")"
+  [[ "$MAW_SCRIPT" != /* ]] && MAW_SCRIPT="${MAW_SCRIPT_DIR}/${MAW_SCRIPT}"
+done
+
+MAW_DIR="$(cd "$(dirname "$MAW_SCRIPT")/.." && pwd)"
 LIB_DIR="${MAW_DIR}/lib"
 
 # shellcheck source=lib/core.sh

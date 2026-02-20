@@ -22,7 +22,7 @@ cmd_list() {
   printf "%s\n" "$(printf '%.0s-' {1..90})"
 
   # 各ワークスペースを表示
-  echo "$state" | jq -r '.workspaces | to_entries[] | [.key, .value.branch, .value.agent, .value.issue, .value.created] | @tsv' | \
+  echo "$state" | jq -r '.workspaces | to_entries[] | [.key, .value.branch, (if .value.agent == "" or .value.agent == null then "-" else .value.agent end), (if .value.issue == "" or .value.issue == null then "-" else .value.issue end), .value.created] | @tsv' | \
   while IFS=$'\t' read -r name branch agent issue created; do
     # 日付を短縮表示
     local short_date="${created:0:10}"
