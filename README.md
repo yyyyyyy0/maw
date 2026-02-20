@@ -161,7 +161,7 @@ project/
 - [x] Phase 1: 基盤 (worktree + symlink + CLI)
 - [ ] Phase 2: コンテキスト共有 (claim, handover, status)
 - [ ] Phase 3: マージとライフサイクル
-- [ ] Phase 4: 拡張 (補完, CoW clone, 多言語対応)
+- [ ] Phase 4: 拡張 (補完, CoW clone, 多言語対応, CI/CD)
 
 ## ライセンス
 
