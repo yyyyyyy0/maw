@@ -519,3 +519,101 @@ teardown() {
   count="$(jq '.claims | length' .maw/claims.json)"
   [ "$count" -eq 0 ]
 }
+
+# ===== maw merge =====
+
+@test "maw merge でブランチが main にマージされる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn test-ws
+  # ワークスペース内でコミット作成
+  cd ".maw-workspaces/test-ws"
+  echo "merged content" > merged.txt
+  git add merged.txt
+  git commit -m "test commit for merge"
+  cd "$TEST_DIR"
+  run "$MAW_BIN" merge test-ws
+  [ "$status" -eq 0 ]
+  # main でコミットが存在することを確認
+  run git log --oneline
+  [[ "$output" =~ "test commit for merge" ]]
+}
+
+@test "maw merge 後にワークスペースが削除される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn test-ws
+  cd ".maw-workspaces/test-ws"
+  echo "x" > x.txt
+  git add x.txt
+  git commit -m "test"
+  cd "$TEST_DIR"
+  run "$MAW_BIN" merge test-ws
+  [ "$status" -eq 0 ]
+  [ ! -d ".maw-workspaces/test-ws" ]
+  local ws
+  ws="$(jq -r '.workspaces["test-ws"]' .maw/state.json)"
+  [ "$ws" = "null" ]
+}
+
+@test "maw merge --no-cleanup でワークスペースが保持される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn test-ws
+  cd ".maw-workspaces/test-ws"
+  echo "x" > x.txt
+  git add x.txt
+  git commit -m "test"
+  cd "$TEST_DIR"
+  run "$MAW_BIN" merge test-ws --no-cleanup
+  [ "$status" -eq 0 ]
+  [ -d ".maw-workspaces/test-ws" ]
+}
+
+@test "maw merge --dry-run では実際のマージが実行されない" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn test-ws
+  cd ".maw-workspaces/test-ws"
+  echo "x" > x.txt
+  git add x.txt
+  git commit -m "dry-run test commit"
+  cd "$TEST_DIR"
+  run "$MAW_BIN" merge test-ws --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "dry-run" ]]
+  # ワークスペースが残っていることを確認
+  [ -d ".maw-workspaces/test-ws" ]
+  # ブランチがマージされていないことを確認
+  run git branch --merged
+  [[ ! "$output" =~ "maw/test-ws" ]]
+}
+
+@test "maw merge で未コミット変更がある場合はエラー" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn test-ws
+  # 未コミットのファイルを作成
+  echo "dirty" > ".maw-workspaces/test-ws/dirty.txt"
+  run "$MAW_BIN" merge test-ws
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "未コミット" ]]
+}
+
+@test "maw merge 後に claims が削除される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn test-ws --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace test-ws
+  cd ".maw-workspaces/test-ws"
+  echo "x" > x.txt
+  git add x.txt
+  git commit -m "test"
+  cd "$TEST_DIR"
+  run "$MAW_BIN" merge test-ws
+  [ "$status" -eq 0 ]
+  local count
+  count="$(jq '.claims | length' .maw/claims.json)"
+  [ "$count" -eq 0 ]
+}
+
+@test "maw merge で存在しないワークスペース名を指定するとエラー" {
+  "$MAW_BIN" init
+  run "$MAW_BIN" merge nonexistent
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "見つかりません" ]]
+}

@@ -31,6 +31,7 @@ Commands:
   claim <file> [options]  ファイル/ディレクトリの排他宣言
   unclaim <file> [options] 排他宣言を解除
   handover [options]      引き継ぎドキュメントを生成
+  merge [name|options]    ブランチをマージ
   cleanup [name|options]  ワークスペースを削除
   doctor                  環境の整合性チェック
 
@@ -81,7 +82,7 @@ main() {
       echo "maw v${MAW_VERSION}"
       exit 0
       ;;
-    init|spawn|list|cleanup|doctor|status|claim|unclaim|handover)
+    init|spawn|list|cleanup|doctor|status|claim|unclaim|handover|merge)
       check_dependencies
       local cmd="$1"
       shift
