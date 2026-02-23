@@ -204,6 +204,32 @@ cmd_doctor() {
     log_success "claims: 整合性OK"
   fi
 
+  # 6. stale (期限切れ) claims チェック
+  echo ""
+  echo "=== Stale Claims ==="
+  local stale_paths=()
+  while IFS=$'\t' read -r claim_path expires_at; do
+    [[ -z "$claim_path" ]] && continue
+    if is_claim_expired "$expires_at"; then
+      stale_paths+=("$claim_path")
+      log_warn "期限切れ claim: ${claim_path} (期限: ${expires_at})"
+      ((issues++)) || true
+    fi
+  done < <(echo "$claims" | jq -r '.claims | to_entries[] | [.key, (.value.expires_at // "")] | @tsv' 2>/dev/null)
+
+  if [[ "${#stale_paths[@]}" -eq 0 ]]; then
+    log_success "stale claims: なし"
+  fi
+
+  if [[ "$fix" == true && "${#stale_paths[@]}" -gt 0 ]]; then
+    for sp in "${stale_paths[@]}"; do
+      claims="$(echo "$claims" | jq --arg path "$sp" 'del(.claims[$path])')"
+    done
+    write_claims "$root" "$claims"
+    log_success "  -> 期限切れ claims を削除しました"
+    ((fixed++)) || true
+  fi
+
   # サマリー
   echo ""
   echo "=== サマリー ==="

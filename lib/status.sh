@@ -65,14 +65,26 @@ cmd_status() {
   if [[ "$claims_count" -eq 0 ]]; then
     log_info "排他宣言はありません。"
   else
-    printf "  %-30s %-16s %-10s %s\n" "FILE" "WORKSPACE" "AGENT" "CLAIMED"
-    echo "  --------------------------------------------------------------------------"
+    printf "  %-30s %-16s %-10s %-10s %s\n" "FILE" "WORKSPACE" "AGENT" "CLAIMED" "EXPIRES"
+    echo "  --------------------------------------------------------------------------------------"
 
-    echo "$claims" | jq -r '.claims | to_entries[] | [.key, .value.workspace, .value.agent, .value.claimed_at] | @tsv' | \
-    while IFS=$'\t' read -r file ws agent claimed; do
+    echo "$claims" | jq -r '.claims | to_entries[] | [.key, .value.workspace, .value.agent, .value.claimed_at, (.value.expires_at // "")] | @tsv' | \
+    while IFS=$'\t' read -r file ws agent claimed expires_at; do
       agent="${agent:--}"
       local date_str="${claimed:0:10}"
-      printf "  %-30s %-16s %-10s %s\n" "$file" "$ws" "$agent" "$date_str"
+      local exp_str="-"
+      if [[ -n "$expires_at" && "$expires_at" != "null" ]]; then
+        exp_str="${expires_at:0:16}"
+      fi
+      if [[ -n "$expires_at" && "$expires_at" != "null" ]] && is_claim_expired "$expires_at"; then
+        # 期限切れ: 赤色
+        printf "  \033[31m%-30s %-16s %-10s %-10s %s [EXPIRED]\033[0m\n" "$file" "$ws" "$agent" "$date_str" "$exp_str"
+      elif [[ -n "$expires_at" && "$expires_at" != "null" ]]; then
+        # TTL あり: 黄色
+        printf "  \033[33m%-30s %-16s %-10s %-10s %s\033[0m\n" "$file" "$ws" "$agent" "$date_str" "$exp_str"
+      else
+        printf "  %-30s %-16s %-10s %-10s %s\n" "$file" "$ws" "$agent" "$date_str" "$exp_str"
+      fi
     done
   fi
 }

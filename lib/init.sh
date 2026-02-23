@@ -20,15 +20,31 @@ cmd_init() {
   mkdir -p "${root}/${MAW_WORKSPACES_DIR}"
   mkdir -p "${root}/${MAW_HANDOVERS_DIR}"
 
-  # パッケージマネージャ検出
-  local pm
-  pm="$(detect_pkg_manager "$root")"
+  # エコシステム検出
+  local ecosystem
+  ecosystem="$(detect_ecosystem "$root")"
 
-  # symlink 対象のデフォルト設定
-  local symlink_dirs='["node_modules"]'
-  if [[ -z "$pm" ]]; then
-    symlink_dirs='[]'
+  # パッケージマネージャ検出 (nodejs の場合のみ)
+  local pm=""
+  if [[ "$ecosystem" == "nodejs" ]]; then
+    pm="$(detect_pkg_manager "$root")"
   fi
+
+  # ecosystem 別 symlink デフォルト設定
+  local symlink_dirs
+  case "$ecosystem" in
+    nodejs)  symlink_dirs='["node_modules"]' ;;
+    python)  symlink_dirs='[".venv"]' ;;
+    rust)    symlink_dirs='[]' ;;
+    go)
+      if [[ -d "${root}/vendor" ]]; then
+        symlink_dirs='["vendor"]'
+      else
+        symlink_dirs='[]'
+      fi
+      ;;
+    *)       symlink_dirs='[]' ;;
+  esac
 
   # GitHub 情報取得 (任意)
   local github_config='{}'
@@ -43,9 +59,10 @@ cmd_init() {
     fi
   fi
 
-  # config.json 作成
+  # config.json 作成 (ecosystem フィールド追加、packageManager 後方互換で保持)
   jq -n \
     --argjson version 1 \
+    --arg ecosystem "$ecosystem" \
     --arg packageManager "${pm:-}" \
     --argjson symlinkDirs "$symlink_dirs" \
     --argjson copyFiles '[]' \
@@ -53,6 +70,7 @@ cmd_init() {
     --argjson github "$github_config" \
     '{
       version: $version,
+      ecosystem: $ecosystem,
       packageManager: $packageManager,
       symlinkDirs: $symlinkDirs,
       copyFiles: $copyFiles,
@@ -66,7 +84,7 @@ cmd_init() {
   # claims.json 初期化
   echo '{"claims":{}}' | jq '.' > "${root}/${MAW_CLAIMS_FILE}"
 
-  # lockfile hash 保存
+  # lockfile hash 保存 (nodejs の場合のみ)
   if [[ -n "$pm" ]]; then
     local lockfile_path
     lockfile_path="$(get_lockfile_path "$root" "$pm")"
@@ -79,6 +97,7 @@ cmd_init() {
   ensure_gitignore "$root" ".maw/" ".maw-workspaces/"
 
   log_success "初期化完了: ${root}"
+  log_info "エコシステム: ${ecosystem}"
   if [[ -n "$pm" ]]; then
     log_info "パッケージマネージャ: ${pm}"
   fi

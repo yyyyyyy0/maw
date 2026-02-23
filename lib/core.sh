@@ -73,11 +73,13 @@ read_state() {
   cat "${root}/${MAW_STATE_FILE}" 2>/dev/null || echo '{"workspaces":{}}'
 }
 
-# state.json を更新
+# state.json を更新 (アトミック書き込み)
 write_state() {
   local root="$1"
   local data="$2"
-  echo "$data" | jq '.' > "${root}/${MAW_STATE_FILE}"
+  local tmp
+  tmp="$(mktemp)"
+  echo "$data" | jq '.' > "$tmp" && mv "$tmp" "${root}/${MAW_STATE_FILE}"
 }
 
 # state.json にワークスペースを追加
@@ -135,6 +137,49 @@ detect_pkg_manager() {
   else
     echo ""
   fi
+}
+
+# エコシステムを自動検出 (nodejs/python/rust/go/generic)
+detect_ecosystem() {
+  local root="$1"
+
+  if [[ -f "${root}/yarn.lock" ]] || [[ -f "${root}/pnpm-lock.yaml" ]] || \
+     [[ -f "${root}/bun.lockb" ]] || [[ -f "${root}/bun.lock" ]] || \
+     [[ -f "${root}/package-lock.json" ]] || [[ -f "${root}/package.json" ]]; then
+    echo "nodejs"
+  elif [[ -f "${root}/requirements.txt" ]] || [[ -f "${root}/poetry.lock" ]] || \
+       [[ -f "${root}/pyproject.toml" ]]; then
+    echo "python"
+  elif [[ -f "${root}/Cargo.toml" ]]; then
+    echo "rust"
+  elif [[ -f "${root}/go.mod" ]]; then
+    echo "go"
+  else
+    echo "generic"
+  fi
+}
+
+# claim の有効期限切れ判定 (期限切れなら 0、有効または無期限なら 1 を返す)
+is_claim_expired() {
+  local expires_at="$1"
+
+  # null または空は無期限 = 期限切れでない
+  [[ -z "$expires_at" || "$expires_at" == "null" ]] && return 1
+
+  local now_epoch expires_epoch
+  now_epoch="$(date -u +%s)"
+
+  # macOS (BSD date): TZ=UTC を指定して UTC として解釈
+  # GNU date: --date でパース
+  if TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%SZ" "$expires_at" +%s &>/dev/null 2>&1; then
+    expires_epoch="$(TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%SZ" "$expires_at" +%s 2>/dev/null)"
+  elif date -d "$expires_at" +%s &>/dev/null 2>&1; then
+    expires_epoch="$(date -d "$expires_at" +%s 2>/dev/null)"
+  else
+    return 1
+  fi
+
+  [[ -n "$expires_epoch" && "$now_epoch" -ge "$expires_epoch" ]]
 }
 
 # lockfile のパスを取得
@@ -213,11 +258,13 @@ read_claims() {
   cat "${root}/${MAW_CLAIMS_FILE}" 2>/dev/null || echo '{"claims":{}}'
 }
 
-# claims.json を書き込み
+# claims.json を書き込み (アトミック書き込み)
 write_claims() {
   local root="$1"
   local data="$2"
-  echo "$data" | jq '.' > "${root}/${MAW_CLAIMS_FILE}"
+  local tmp
+  tmp="$(mktemp)"
+  echo "$data" | jq '.' > "$tmp" && mv "$tmp" "${root}/${MAW_CLAIMS_FILE}"
 }
 
 # cwd から所属ワークスペース名を自動検出

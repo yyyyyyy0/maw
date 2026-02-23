@@ -617,3 +617,153 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" =~ "見つかりません" ]]
 }
+
+# ===== Phase 4-1: Claim TTL =====
+
+@test "maw claim --ttl で expires_at が設定される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  run "$MAW_BIN" claim src/auth.ts --workspace ws1 --ttl 60
+  [ "$status" -eq 0 ]
+  local expires
+  expires="$(jq -r '.claims["src/auth.ts"].expires_at' .maw/claims.json)"
+  [ "$expires" != "null" ]
+  [ -n "$expires" ]
+}
+
+@test "maw claim で TTL 省略時は expires_at が null になる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1
+  local expires
+  expires="$(jq -r '.claims["src/auth.ts"].expires_at' .maw/claims.json)"
+  [ "$expires" = "null" ]
+}
+
+@test "maw claim --ttl 0 で期限切れ claim が作成される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  # TTL=0 で即時期限切れ
+  "$MAW_BIN" claim src/auth.ts --workspace ws1 --ttl 0
+  sleep 1
+  local expires
+  expires="$(jq -r '.claims["src/auth.ts"].expires_at' .maw/claims.json)"
+  [ "$expires" != "null" ]
+}
+
+@test "maw doctor は期限切れ claim を検出する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1 --ttl 0
+  sleep 1
+  run "$MAW_BIN" doctor
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "期限切れ" ]]
+}
+
+@test "maw doctor --fix は期限切れ claim を削除する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1 --ttl 0
+  sleep 1
+  run "$MAW_BIN" doctor --fix
+  [ "$status" -eq 0 ]
+  local count
+  count="$(jq '.claims | length' .maw/claims.json)"
+  [ "$count" -eq 0 ]
+}
+
+@test "maw status は期限切れ claim を EXPIRED 表示する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1 --ttl 0
+  sleep 1
+  run "$MAW_BIN" status
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "EXPIRED" ]]
+}
+
+@test "maw doctor --fix は有効な claim を保持する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1 --ttl 60
+  run "$MAW_BIN" doctor --fix
+  [ "$status" -eq 0 ]
+  local count
+  count="$(jq '.claims | length' .maw/claims.json)"
+  [ "$count" -eq 1 ]
+}
+
+# ===== Phase 4.5: Ecosystem 汎用化 =====
+
+@test "nodejs プロジェクト (yarn.lock) で ecosystem=nodejs が設定される" {
+  run "$MAW_BIN" init
+  [ "$status" -eq 0 ]
+  local ecosystem
+  ecosystem="$(jq -r '.ecosystem' .maw/config.json)"
+  [ "$ecosystem" = "nodejs" ]
+}
+
+@test "nodejs プロジェクトで symlinkDirs に node_modules が含まれる" {
+  run "$MAW_BIN" init
+  [ "$status" -eq 0 ]
+  local dirs
+  dirs="$(jq -r '.symlinkDirs[0]' .maw/config.json)"
+  [ "$dirs" = "node_modules" ]
+}
+
+@test "python プロジェクトで ecosystem=python が設定される" {
+  # yarn.lock を削除して pyproject.toml を作成
+  rm -f yarn.lock package.json
+  echo '[tool.poetry]' > pyproject.toml
+  git add pyproject.toml
+  git commit -m "python project"
+  run "$MAW_BIN" init
+  [ "$status" -eq 0 ]
+  local ecosystem
+  ecosystem="$(jq -r '.ecosystem' .maw/config.json)"
+  [ "$ecosystem" = "python" ]
+}
+
+@test "rust プロジェクトで ecosystem=rust が設定される" {
+  rm -f yarn.lock package.json
+  echo '[package]' > Cargo.toml
+  git add Cargo.toml
+  git commit -m "rust project"
+  run "$MAW_BIN" init
+  [ "$status" -eq 0 ]
+  local ecosystem
+  ecosystem="$(jq -r '.ecosystem' .maw/config.json)"
+  [ "$ecosystem" = "rust" ]
+}
+
+@test "go プロジェクトで ecosystem=go が設定される" {
+  rm -f yarn.lock package.json
+  echo 'module example.com/app' > go.mod
+  git add go.mod
+  git commit -m "go project"
+  run "$MAW_BIN" init
+  [ "$status" -eq 0 ]
+  local ecosystem
+  ecosystem="$(jq -r '.ecosystem' .maw/config.json)"
+  [ "$ecosystem" = "go" ]
+}
+
+@test "lockfile なしのプロジェクトで ecosystem=generic が設定される" {
+  rm -f yarn.lock package.json
+  git add -A
+  git commit -m "generic project" --allow-empty
+  run "$MAW_BIN" init
+  [ "$status" -eq 0 ]
+  local ecosystem
+  ecosystem="$(jq -r '.ecosystem' .maw/config.json)"
+  [ "$ecosystem" = "generic" ]
+}
+
+@test "既存 nodejs プロジェクトで packageManager フィールドが後方互換で残る" {
+  run "$MAW_BIN" init
+  [ "$status" -eq 0 ]
+  local pm
+  pm="$(jq -r '.packageManager' .maw/config.json)"
+  [ "$pm" = "yarn" ]
+}

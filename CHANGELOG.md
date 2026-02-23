@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-24
+
+### Added
+- **Claim TTL**: `maw claim <file> --ttl <minutes>` で有効期限を設定可能
+  - `claims.json` に `expires_at` (ISO 8601) フィールドを追加
+  - `maw status` で期限切れ claim を赤色、TTL 付き claim を黄色で表示
+  - `maw doctor` で期限切れ claim を検出 (Stale Claims セクション追加)
+  - `maw doctor --fix` で期限切れ claim を自動削除
+- **Ecosystem 汎用化**: `maw init` がプロジェクト種別を自動検出して適切なデフォルト設定を生成
+  - 検出対象: nodejs / python / rust / go / generic
+  - ecosystem 別 symlink デフォルト: nodejs=`node_modules`, python=`.venv`, rust/generic=なし, go=`vendor`(存在する場合)
+  - `config.json` に `ecosystem` フィールドを追加 (`packageManager` は後方互換で保持)
+- テスト 14 ケース追加 (合計 73 テスト)
+
+### Changed
+- `write_state()` / `write_claims()` をアトミック書き込みに変更 (tmpfile 経由の mv)
+- `lib/core.sh` に `detect_ecosystem()`, `is_claim_expired()` ヘルパー追加
+- `maw status` の Claims テーブルに EXPIRES カラムを追加
+
+## [0.3.0] - 2026-02-24
+
 ### Added
 - `maw merge [<name>]` コマンド: ワークスペースのブランチをベースブランチにマージ
   - `--base <branch>` オプションでマージ先ブランチを指定 (デフォルト: 現在のブランチ)
@@ -62,5 +83,7 @@
 - symlink 経由の起動時にスクリプトパス解決が失敗する問題
 - `maw list` のカラム表示崩れ
 
+[0.4.0]: https://github.com/yyyyyyy0/maw/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/yyyyyyy0/maw/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/yyyyyyy0/maw/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/yyyyyyy0/maw/releases/tag/v0.1.0

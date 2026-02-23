@@ -4,17 +4,20 @@
 cmd_claim() {
   local target=""
   local workspace=""
+  local ttl=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --workspace) workspace="$2"; shift 2 ;;
+      --ttl) ttl="$2"; shift 2 ;;
       -h|--help)
-        echo "Usage: maw claim <file|dir> [--workspace <name>]"
+        echo "Usage: maw claim <file|dir> [--workspace <name>] [--ttl <minutes>]"
         echo ""
         echo "ファイルまたはディレクトリの排他宣言を行います。"
         echo ""
         echo "Options:"
         echo "  --workspace <name>  ワークスペース名 (省略時は自動検出)"
+        echo "  --ttl <minutes>     有効期限 (分単位、省略時は無期限)"
         return 0
         ;;
       -*)
@@ -94,14 +97,33 @@ cmd_claim() {
   local now
   now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
+  # TTL から expires_at を計算 (UTC で統一)
+  local expires_at="null"
+  if [[ -n "$ttl" ]]; then
+    # macOS (BSD date): TZ=UTC で UTC として計算
+    # GNU date: -d オプションでパース
+    if TZ=UTC date -j -v+"${ttl}M" +"%Y-%m-%dT%H:%M:%SZ" &>/dev/null 2>&1; then
+      expires_at="\"$(TZ=UTC date -u -j -v+"${ttl}M" +"%Y-%m-%dT%H:%M:%SZ")\""
+    elif date -u -d "+${ttl} minutes" +"%Y-%m-%dT%H:%M:%SZ" &>/dev/null 2>&1; then
+      expires_at="\"$(date -u -d "+${ttl} minutes" +"%Y-%m-%dT%H:%M:%SZ")\""
+    else
+      log_warn "--ttl の日時計算に失敗しました。無期限で登録します。"
+    fi
+  fi
+
   claims="$(echo "$claims" | jq \
     --arg path "$claim_path" \
     --arg ws "$workspace" \
     --arg agent "$agent" \
     --arg now "$now" \
-    '.claims[$path] = {workspace: $ws, agent: $agent, claimed_at: $now}')"
+    --argjson expires "$expires_at" \
+    '.claims[$path] = {workspace: $ws, agent: $agent, claimed_at: $now, expires_at: $expires}')"
 
   write_claims "$root" "$claims"
 
-  log_success "claim 登録: ${claim_path} -> ${workspace}"
+  local msg="claim 登録: ${claim_path} -> ${workspace}"
+  if [[ "$expires_at" != "null" ]]; then
+    msg="${msg} (TTL: ${ttl}分)"
+  fi
+  log_success "$msg"
 }
