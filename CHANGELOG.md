@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] - 2026-02-23
 
 ### Added
 - `maw status` コマンド: ワークスペース状況とファイル排他情報を一括表示
@@ -49,3 +49,6 @@
 ### Fixed
 - symlink 経由の起動時にスクリプトパス解決が失敗する問題
 - `maw list` のカラム表示崩れ
+
+[0.2.0]: https://github.com/yyyyyyy0/maw/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/yyyyyyy0/maw/releases/tag/v0.1.0
