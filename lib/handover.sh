@@ -12,6 +12,7 @@ cmd_handover() {
   local risk_severity="medium"
   local resume_command=""
   local verification_status=""
+  local blocked_by=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -71,6 +72,11 @@ cmd_handover() {
         esac
         shift 2
         ;;
+      --blocked-by)
+        edit_mode=true
+        blocked_by="$2"
+        shift 2
+        ;;
       -h|--help)
         echo "Usage: maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <name>] [edit options]"
         echo ""
@@ -88,6 +94,7 @@ cmd_handover() {
         echo "  --risk-severity <level>    リスク重要度 (low|medium|high|critical, デフォルト: medium)"
         echo "  --resume-command <cmd>     resume_commands 配列に追加"
         echo "  --verification-status <s>  verification_status を更新 (pending|passed|failed|skipped)"
+        echo "  --blocked-by <text>        blocked_by 配列に追加"
         return 0
         ;;
       -*)
@@ -120,7 +127,7 @@ cmd_handover() {
 
   # --edit モード（handover JSON を更新）
   if [[ "$edit_mode" == true ]]; then
-    cmd_handover_edit "$root" "$workspace" "$next_step" "$decision" "$risk" "$risk_severity" "$resume_command" "$verification_status"
+    cmd_handover_edit "$root" "$workspace" "$next_step" "$decision" "$risk" "$risk_severity" "$resume_command" "$verification_status" "$blocked_by"
     return $?
   fi
 
@@ -380,6 +387,7 @@ cmd_handover_edit() {
   local risk_severity="$6"
   local resume_command="$7"
   local verification_status="$8"
+  local blocked_by="$9"
 
   # ワークスペース検出
   if [[ -z "$workspace" ]]; then
@@ -443,6 +451,13 @@ cmd_handover_edit() {
   if [[ -n "$resume_command" ]]; then
     json_data="$(echo "$json_data" | jq --arg cmd "$resume_command" '.resume_commands += [$cmd]')"
     log_success "resume_command を追加: ${resume_command}"
+    updated=true
+  fi
+
+  # blocked_by に追加
+  if [[ -n "$blocked_by" ]]; then
+    json_data="$(echo "$json_data" | jq --arg desc "$blocked_by" '.blocked_by += [$desc]')"
+    log_success "blocked_by を追加: ${blocked_by}"
     updated=true
   fi
 

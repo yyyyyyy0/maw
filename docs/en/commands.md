@@ -253,6 +253,7 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
 | `--risk-severity <level>` | Risk severity (low\|medium\|high\|critical, default: medium) |
 | `--resume-command <cmd>` | Add to resume_commands array |
 | `--verification-status <s>` | Update verification_status (pending\|passed\|failed\|skipped) |
+| `--blocked-by <text>` | Add to blocked_by array (record factors blocking work) |
 
 ### --scope Modes
 
@@ -502,7 +503,7 @@ maw doctor [--fix] [--aggressive] [--json]
 |--------|-------------|
 | `--fix` | Auto-repair detected issues |
 | `--aggressive` | Check merged branches & dangling worktrees (with confirmation prompt when using `--fix`) |
-| `--json` | Output results in JSON format (v2 schema, v0.6.0+) |
+| `--json` | Output results in JSON format (v2 schema, v0.6.0+). Exits with non-zero when issues are detected |
 
 ### Checks Performed
 

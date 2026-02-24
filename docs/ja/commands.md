@@ -253,6 +253,7 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
 | `--risk-severity <level>` | リスク重要度 (low\|medium\|high\|critical, デフォルト: medium) |
 | `--resume-command <cmd>` | resume_commands 配列に追加 |
 | `--verification-status <s>` | verification_status を更新 (pending\|passed\|failed\|skipped) |
+| `--blocked-by <text>` | blocked_by 配列に追加（作業をブロックする要因を記録） |
 
 ### --scope モード
 
@@ -502,7 +503,7 @@ maw doctor [--fix] [--aggressive] [--json]
 |-----------|------|
 | `--fix` | 検出された問題を自動修復 |
 | `--aggressive` | マージ済みブランチ・dangling worktree の削除チェック（`--fix` 時に確認プロンプト付きで削除実行） |
-| `--json` | 結果を JSON 形式で出力（v2 スキーマ、v0.6.0 以降） |
+| `--json` | 結果を JSON 形式で出力（v2 スキーマ、v0.6.0 以降）。問題検出時は 非0 で終了 |
 
 ### チェック項目
 

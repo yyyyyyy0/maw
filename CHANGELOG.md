@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+- **Handover `--blocked-by` オプション**: `maw handover` に作業ブロック要因を記録するオプションを追加
+  - `--blocked-by <text>`: blocked_by 配列に追加
+  - `takeover --format plan` で `blockers_count` に反映
+- **Doctor `--json` exit code**: `maw doctor --json` が問題検出時に 非0 で終了するように変更
+  - CI での失敗検出が可能に
+
+### Changed
+- `lib/handover.sh`: `--blocked-by` 引数と追加ロジックを実装
+- `lib/doctor.sh`: JSON 出力モードで exit code を返すように変更
+- `docs/ja/commands.md`, `docs/en/commands.md`: `--blocked-by` と `doctor --json` exit code のドキュメント追加
+
 ## [0.6.0] - 2026-02-24
 
 ### Added

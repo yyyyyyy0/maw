@@ -509,7 +509,9 @@ cmd_doctor_json_output() {
     stale_claims_status="warning"
   fi
 
-  jq -n \
+  # 出力を生成
+  local json_output
+  json_output="$(jq -n \
     --argjson version 2 \
     --arg format "doctor" \
     --arg timestamp "$now" \
@@ -555,7 +557,15 @@ cmd_doctor_json_output() {
         stale_claims: {status: $stale_claims_status, score: $stale_claims_score}
       },
       checks: $checks
-    }'
+    }')"
+
+  # 出力
+  echo "$json_output"
+
+  # 問題検出時は非0終了
+  if [[ "$failed" -gt 0 ]]; then
+    exit 1
+  fi
 }
 
 # Aggressive モード

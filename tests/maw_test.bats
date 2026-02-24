@@ -778,7 +778,7 @@ teardown() {
   [ -f ".maw/handovers/ws-ws1.json" ]
   local version
   version="$(jq -r '.version' .maw/handovers/ws-ws1.json)"
-  [ "$version" -eq 1 ]
+  [ "$version" -eq 2 ]
 }
 
 @test "handover JSON の必須フィールドが揃っている" {
@@ -1114,4 +1114,61 @@ teardown() {
   local category
   category="$(echo "$output" | jq -r '.checks[0].category')"
   [ "$category" != "null" ]
+}
+
+# ===== Phase 6: --blocked-by オプション =====
+
+@test "maw handover --blocked-by で blocked_by に追加される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" handover --workspace ws1 --blocked-by "PR #123 がマージ待ち"
+  [ "$status" -eq 0 ]
+  local blocked
+  blocked="$(jq -r '.blocked_by[0]' .maw/handovers/ws-ws1.json)"
+  [ "$blocked" = "PR #123 がマージ待ち" ]
+}
+
+@test "maw handover --blocked-by 複数回指定で配列に追加される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker 1"
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker 2"
+  local count
+  count="$(jq '.blocked_by | length' .maw/handovers/ws-ws1.json)"
+  [ "$count" -eq 2 ]
+}
+
+@test "maw takeover --format plan で blocked_by が blockers_count に反映される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "依存機能が未実装"
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+  local blockers_count
+  blockers_count="$(echo "$output" | jq -r '.blockers_count')"
+  [ "$blockers_count" -eq 1 ]
+}
+
+# ===== Phase 6: Doctor --json exit code =====
+
+@test "maw doctor --json は問題なしで exit 0" {
+  "$MAW_BIN" init
+  run "$MAW_BIN" doctor --json
+  [ "$status" -eq 0 ]
+}
+
+@test "maw doctor --json は問題検出時に 非0 で終了する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1
+  # orphaned state を作成
+  rm -rf ".maw-workspaces/ws1"
+  git worktree prune
+  run "$MAW_BIN" doctor --json
+  [ "$status" -ne 0 ]
+  local failed
+  failed="$(echo "$output" | jq -r '.summary.failed')"
+  [ "$failed" -gt 0 ]
 }
