@@ -232,7 +232,7 @@ Generate a handover document. In addition to Markdown, a JSON sidecar is also pr
 ### Synopsis
 
 ```bash
-maw handover [--workspace <name>] [--scope full|summary|evidence]
+maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <name>]
 ```
 
 ### Options
@@ -241,6 +241,7 @@ maw handover [--workspace <name>] [--scope full|summary|evidence]
 |--------|-------------|---------|
 | `--workspace <name>` | Explicitly specify workspace name | auto-detect from current dir |
 | `--scope <mode>` | Output scope | `full` |
+| `--validate <name>` | Validate handover JSON integrity (no generation) | — |
 
 ### --scope Modes
 
@@ -257,22 +258,39 @@ maw handover [--workspace <name>] [--scope full|summary|evidence]
 .maw/handovers/ws-<name>.json  # JSON (for LLMs / maw takeover) — except scope=evidence
 ```
 
-### JSON Sidecar Schema
+### JSON Sidecar Schema (v2)
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "workspace": "feature-auth",
   "branch": "claude/feature-auth",
   "base_branch": "main",
   "agent": "claude",
   "issue": "42",
+  "summary": "Add JWT authentication",
+  "decisions": [
+    {
+      "topic": "Auth library",
+      "decision": "Use jsonwebtoken",
+      "rationale": "Most widely used in Node.js ecosystem"
+    }
+  ],
+  "risks": [
+    {
+      "description": "Token expiration configuration",
+      "mitigation": "Make configurable via environment variables"
+    }
+  ],
+  "blocked_by": ["External API specification"],
+  "verification_status": "pending",
   "diff_stat": "...",
   "diff": "... (4096 byte limit)",
   "log": ["abc1234 fix: auth bug"],
   "claims": { "src/auth.ts": { "workspace": "...", "agent": "...", "claimed_at": "...", "expires_at": null } },
   "state": "clean",
   "next_steps": [],
+  "resume_commands": ["npm test", "npm run build"],
   "generated_at": "2026-02-24T10:00:00Z"
 }
 ```
@@ -317,6 +335,7 @@ maw takeover [<name>] [--format md|json|prompt]
 | Mode | Description |
 |------|-------------|
 | `prompt` | Structured session-resume prompt for agents |
+| `plan` | Plan information as JSON (verification_status, decisions_count, etc.) |
 | `json` | Raw JSON sidecar output (pretty-printed via `jq .`) |
 | `md` | Raw Markdown handover file output |
 
@@ -325,6 +344,9 @@ maw takeover [<name>] [--format md|json|prompt]
 ```bash
 # Resume session as an agent
 maw takeover feature-auth
+
+# Check plan information
+maw takeover feature-auth --format plan
 
 # Inspect the JSON bundle
 maw takeover feature-auth --format json
@@ -421,14 +443,14 @@ maw cleanup --all --dry-run
 
 ---
 
-## `maw doctor [--fix]`
+## `maw doctor [options]`
 
 Check environment integrity.
 
 ### Synopsis
 
 ```bash
-maw doctor [--fix]
+maw doctor [--fix] [--aggressive] [--json]
 ```
 
 ### Options
@@ -436,6 +458,8 @@ maw doctor [--fix]
 | Option | Description |
 |--------|-------------|
 | `--fix` | Auto-repair detected issues |
+| `--aggressive` | Check merged branches & dangling worktrees (with confirmation prompt when using `--fix`) |
+| `--json` | Output results in JSON format |
 
 ### Checks Performed
 
@@ -448,6 +472,14 @@ maw doctor [--fix]
 | Orphaned claim | Claim remains for deleted WS | Delete claim |
 | Stale claim | Claim TTL has expired | Delete claim |
 
+### --aggressive Mode Additional Checks
+
+| Check | Description | `--fix` action |
+|-------|-------------|----------------|
+| Merged branches | Branches already merged to base | Delete worktree & branch with confirmation prompt |
+| Dangling worktree | Worktrees removable by git worktree prune | Run git worktree prune |
+| Empty handover files | Handover files with zero size | Delete |
+
 ### Example Output
 
 ```
@@ -455,4 +487,45 @@ maw doctor [--fix]
 [WARN] stale claim: src/auth.ts (expired: 2026-02-20 09:00)
 [OK] worktree integrity: OK
 [OK] symlink integrity: OK
+```
+
+---
+
+## `maw migrate <json-file>`
+
+Migrate handover JSON from v1 to v2.
+
+### Synopsis
+
+```bash
+maw migrate <json-file>
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `<json-file>` | Path to JSON file to migrate |
+
+### Operation
+
+1. Verify JSON file version
+2. If version 1, update to version 2
+3. Add the following fields (initialized with empty arrays/default values):
+   - `decisions`: []
+   - `risks`: []
+   - `blocked_by`: []
+   - `resume_commands`: []
+   - `verification_status`: "pending"
+4. Overwrite the original JSON file
+
+### Examples
+
+```bash
+# Migrate handover JSON from v1 to v2
+maw migrate .maw/handovers/ws-feature-auth.json
+
+# Verify the migrated version
+cat .maw/handovers/ws-feature-auth.json | jq '.version'
+# Output: 2
 ```

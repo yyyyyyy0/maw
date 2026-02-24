@@ -232,7 +232,7 @@ maw unclaim src/auth.ts --force       # 他 WS の claim も強制解除
 ### 概要
 
 ```bash
-maw handover [--workspace <name>] [--scope full|summary|evidence]
+maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <name>]
 ```
 
 ### オプション
@@ -241,6 +241,7 @@ maw handover [--workspace <name>] [--scope full|summary|evidence]
 |-----------|------|-----------|
 | `--workspace <name>` | ワークスペース名を明示指定 | 現在の WS を自動検出 |
 | `--scope <mode>` | 出力スコープを指定 | `full` |
+| `--validate <name>` | handover JSON の整合性を検証（生成は行わない） | — |
 
 ### --scope モード
 
@@ -257,22 +258,39 @@ maw handover [--workspace <name>] [--scope full|summary|evidence]
 .maw/handovers/ws-<name>.json  # JSON（LLM / maw takeover 向け）※ scope=evidence 以外
 ```
 
-### JSON サイドカースキーマ
+### JSON サイドカースキーマ (v2)
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "workspace": "feature-auth",
   "branch": "claude/feature-auth",
   "base_branch": "main",
   "agent": "claude",
   "issue": "42",
+  "summary": "Add JWT authentication",
+  "decisions": [
+    {
+      "topic": "Auth library",
+      "decision": "jsonwebtoken を使用",
+      "rationale": "Node.js エコシステムで最も広く使われている"
+    }
+  ],
+  "risks": [
+    {
+      "description": "トークン有効期限の設定",
+      "mitigation": "環境変数で設定可能にする"
+    }
+  ],
+  "blocked_by": ["外部 API の仕様確定"],
+  "verification_status": "pending",
   "diff_stat": "...",
   "diff": "...（4096バイト上限）",
   "log": ["abc1234 fix: auth bug"],
   "claims": { "src/auth.ts": { "workspace": "...", "agent": "...", "claimed_at": "...", "expires_at": null } },
   "state": "clean",
   "next_steps": [],
+  "resume_commands": ["npm test", "npm run build"],
   "generated_at": "2026-02-24T10:00:00Z"
 }
 ```
@@ -317,6 +335,7 @@ maw takeover [<name>] [--format md|json|prompt]
 | モード | 説明 |
 |--------|------|
 | `prompt` | エージェント向けセッション再開プロンプト（構造化テキスト） |
+| `plan` | プラン情報を JSON 形式で出力（verification_status、decisions_count など） |
 | `json` | JSON サイドカーをそのまま出力（`jq .` 整形済み） |
 | `md` | Markdown handover ファイルをそのまま出力 |
 
@@ -325,6 +344,9 @@ maw takeover [<name>] [--format md|json|prompt]
 ```bash
 # エージェントとしてセッションを再開する
 maw takeover feature-auth
+
+# プラン情報を確認する
+maw takeover feature-auth --format plan
 
 # JSON を確認する
 maw takeover feature-auth --format json
@@ -421,14 +443,14 @@ maw cleanup --all --dry-run
 
 ---
 
-## `maw doctor [--fix]`
+## `maw doctor [options]`
 
 環境の整合性をチェックします。
 
 ### 概要
 
 ```bash
-maw doctor [--fix]
+maw doctor [--fix] [--aggressive] [--json]
 ```
 
 ### オプション
@@ -436,6 +458,8 @@ maw doctor [--fix]
 | オプション | 説明 |
 |-----------|------|
 | `--fix` | 検出された問題を自動修復 |
+| `--aggressive` | マージ済みブランチ・dangling worktree の削除チェック（`--fix` 時に確認プロンプト付きで削除実行） |
+| `--json` | 結果を JSON 形式で出力 |
 
 ### チェック項目
 
@@ -448,6 +472,14 @@ maw doctor [--fix]
 | Orphaned claim | 削除済み WS の claim が残っている | claim を削除 |
 | Stale claim | TTL 期限切れの claim | claim を削除 |
 
+### --aggressive モードの追加チェック項目
+
+| チェック | 説明 | `--fix` での対応 |
+|---------|------|-----------------|
+| マージ済みブランチ | base ブランチにマージ済みのブランチ | 確認プロンプト付きで worktree・ブランチ削除 |
+| Dangling worktree | git worktree prune で削除可能な worktree | git worktree prune 実行 |
+| 空 handover ファイル | サイズが 0 の handover ファイル | 削除 |
+
 ### 出力例
 
 ```
@@ -455,4 +487,45 @@ maw doctor [--fix]
 [WARN] stale claim: src/auth.ts (expired: 2026-02-20 09:00)
 [OK] worktree integrity: OK
 [OK] symlink integrity: OK
+```
+
+---
+
+## `maw migrate <json-file>`
+
+handover JSON を v1 から v2 に移行します。
+
+### 概要
+
+```bash
+maw migrate <json-file>
+```
+
+### 引数
+
+| 引数 | 説明 |
+|------|------|
+| `<json-file>` | 移行対象の JSON ファイルパス |
+
+### 動作
+
+1. JSON ファイルの version を確認
+2. version 1 の場合、version 2 に更新
+3. 以下のフィールドを追加（空配列/デフォルト値で初期化）:
+   - `decisions`: []
+   - `risks`: []
+   - `blocked_by`: []
+   - `resume_commands`: []
+   - `verification_status`: "pending"
+4. 元の JSON ファイルを上書き
+
+### 使用例
+
+```bash
+# handover JSON を v1 から v2 に移行
+maw migrate .maw/handovers/ws-feature-auth.json
+
+# 移行後の JSON を確認
+cat .maw/handovers/ws-feature-auth.json | jq '.version'
+# 出力: 2
 ```
