@@ -227,12 +227,12 @@ maw unclaim src/auth.ts --force       # 他 WS の claim も強制解除
 
 ## `maw handover [options]`
 
-引き継ぎドキュメントを生成します。
+引き継ぎドキュメントを生成します。Markdown ファイルに加えて JSON サイドカーも出力します（v0.5.0 以降）。
 
 ### 概要
 
 ```bash
-maw handover [--workspace <name>]
+maw handover [--workspace <name>] [--scope full|summary|evidence]
 ```
 
 ### オプション
@@ -240,19 +240,103 @@ maw handover [--workspace <name>]
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
 | `--workspace <name>` | ワークスペース名を明示指定 | 現在の WS を自動検出 |
+| `--scope <mode>` | 出力スコープを指定 | `full` |
+
+### --scope モード
+
+| モード | Markdown | JSON サイドカー | 説明 |
+|--------|---------|----------------|------|
+| `full` | 生成 | 生成 | 全セクション（デフォルト） |
+| `summary` | 生成 | 生成 | ブランチ・diff stat・next_steps のみ（diff 本体は省略） |
+| `evidence` | 生成 | **生成しない** | git log・変更ファイル・未コミット変更のみ |
 
 ### 出力先
 
-`.maw/handovers/ws-<name>.md`
+```
+.maw/handovers/ws-<name>.md    # Markdown（人間向け）
+.maw/handovers/ws-<name>.json  # JSON（LLM / maw takeover 向け）※ scope=evidence 以外
+```
 
-### 生成内容
+### JSON サイドカースキーマ
+
+```json
+{
+  "version": 1,
+  "workspace": "feature-auth",
+  "branch": "claude/feature-auth",
+  "base_branch": "main",
+  "agent": "claude",
+  "issue": "42",
+  "diff_stat": "...",
+  "diff": "...（4096バイト上限）",
+  "log": ["abc1234 fix: auth bug"],
+  "claims": { "src/auth.ts": { "workspace": "...", "agent": "...", "claimed_at": "...", "expires_at": null } },
+  "state": "clean",
+  "next_steps": [],
+  "generated_at": "2026-02-24T10:00:00Z"
+}
+```
+
+**state の値**: `clean`（変更なし）/ `dirty`（未コミット変更あり）/ `stash`（stash あり）
+
+### 生成内容（Markdown）
 
 - ワークスペース情報（ブランチ・エージェント・Issue）
-- コミット履歴（`git log --oneline` 最新 20 件）
+- コミット履歴（`git log --oneline`）
 - 変更ファイル（`git diff --name-status`）
 - 未コミット変更（`git status --short`）
 - claims 一覧（当該 WS のみ）
 - 引き継ぎメモ（自由記述プレースホルダー）
+
+---
+
+## `maw takeover [<name>] [options]`
+
+handover JSON bundle を読み込んでセッション再開プロンプトを出力します（v0.5.0 以降）。
+
+### 概要
+
+```bash
+maw takeover [<name>] [--format md|json|prompt]
+```
+
+### 引数
+
+| 引数 | 説明 |
+|------|------|
+| `<name>` | ワークスペース名（省略時は自動検出） |
+
+### オプション
+
+| オプション | 説明 | デフォルト |
+|-----------|------|-----------|
+| `--format <mode>` | 出力形式 | `prompt` |
+
+### --format モード
+
+| モード | 説明 |
+|--------|------|
+| `prompt` | エージェント向けセッション再開プロンプト（構造化テキスト） |
+| `json` | JSON サイドカーをそのまま出力（`jq .` 整形済み） |
+| `md` | Markdown handover ファイルをそのまま出力 |
+
+### 使用例
+
+```bash
+# エージェントとしてセッションを再開する
+maw takeover feature-auth
+
+# JSON を確認する
+maw takeover feature-auth --format json
+
+# Markdown を確認する
+maw takeover feature-auth --format md
+```
+
+### 前提条件
+
+`maw handover`（scope = `full` または `summary`）で JSON サイドカーが生成されていること。
+JSON ファイルがない場合はエラーになります。
 
 ---
 

@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-02-24
+
+### Added
+- **Handover JSON bundle**: `maw handover` が `.maw/handovers/ws-<name>.json` サイドカーを生成
+  - フィールド: `version`, `workspace`, `branch`, `base_branch`, `agent`, `issue`, `diff_stat`, `diff`（4KB上限）, `log`（配列）, `claims`（スナップショット）, `state`（clean/dirty/stash）, `next_steps`, `generated_at`
+- **`maw handover --scope`**: 出力スコープを選択可能
+  - `full`（デフォルト）: Markdown + JSON サイドカー両方
+  - `summary`: Markdown + JSON 両方、diff 本体は省略
+  - `evidence`: Markdown のみ（JSON サイドカーなし）
+- **`maw takeover [<name>]`**: handover JSON bundle を読んでセッション再開プロンプトを出力
+  - `--format prompt`（デフォルト）: エージェント向け構造化プロンプト
+  - `--format json`: JSON サイドカーをそのまま出力
+  - `--format md`: Markdown handover ファイルをそのまま出力
+- テスト 14 ケース追加（合計 87 テスト）
+
+### Changed
+- `bin/maw` バージョンを `0.5.0` に更新
+
 ## [0.4.0] - 2026-02-24
 
 ### Added

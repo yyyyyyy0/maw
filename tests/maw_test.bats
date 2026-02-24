@@ -767,3 +767,143 @@ teardown() {
   pm="$(jq -r '.packageManager' .maw/config.json)"
   [ "$pm" = "yarn" ]
 }
+
+# ===== Phase 5: handover JSON bundle =====
+
+@test "maw handover が JSON サイドカーを生成する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  run "$MAW_BIN" handover --workspace ws1
+  [ "$status" -eq 0 ]
+  [ -f ".maw/handovers/ws-ws1.json" ]
+  local version
+  version="$(jq -r '.version' .maw/handovers/ws-ws1.json)"
+  [ "$version" -eq 1 ]
+}
+
+@test "handover JSON の必須フィールドが揃っている" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  local json=".maw/handovers/ws-ws1.json"
+  [ "$(jq 'has("version")' "$json")" = "true" ]
+  [ "$(jq 'has("workspace")' "$json")" = "true" ]
+  [ "$(jq 'has("branch")' "$json")" = "true" ]
+  [ "$(jq 'has("base_branch")' "$json")" = "true" ]
+  [ "$(jq 'has("state")' "$json")" = "true" ]
+  [ "$(jq 'has("generated_at")' "$json")" = "true" ]
+}
+
+@test "handover JSON の workspace フィールドが正しい" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  local ws
+  ws="$(jq -r '.workspace' .maw/handovers/ws-ws1.json)"
+  [ "$ws" = "ws1" ]
+}
+
+@test "handover JSON の state が clean である（変更なし）" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  local state_val
+  state_val="$(jq -r '.state' .maw/handovers/ws-ws1.json)"
+  [ "$state_val" = "clean" ]
+}
+
+@test "handover JSON の log が配列である" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  local log_type
+  log_type="$(jq -r '.log | type' .maw/handovers/ws-ws1.json)"
+  [ "$log_type" = "array" ]
+}
+
+@test "handover JSON の claims フィールドが存在する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1
+  "$MAW_BIN" handover --workspace ws1
+  local claims_type
+  claims_type="$(jq -r '.claims | type' .maw/handovers/ws-ws1.json)"
+  [ "$claims_type" = "object" ]
+  local claimed
+  claimed="$(jq -r '.claims["src/auth.ts"].workspace' .maw/handovers/ws-ws1.json)"
+  [ "$claimed" = "ws1" ]
+}
+
+# ===== Phase 5: handover --scope =====
+
+@test "maw handover --scope summary が md と json を生成する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  run "$MAW_BIN" handover --workspace ws1 --scope summary
+  [ "$status" -eq 0 ]
+  [ -f ".maw/handovers/ws-ws1.md" ]
+  [ -f ".maw/handovers/ws-ws1.json" ]
+}
+
+@test "maw handover --scope evidence が md のみ生成する（json なし）" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  run "$MAW_BIN" handover --workspace ws1 --scope evidence
+  [ "$status" -eq 0 ]
+  [ -f ".maw/handovers/ws-ws1.md" ]
+  [ ! -f ".maw/handovers/ws-ws1.json" ]
+}
+
+@test "maw handover --scope full がデフォルトと同じく md と json を生成する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  run "$MAW_BIN" handover --workspace ws1 --scope full
+  [ "$status" -eq 0 ]
+  [ -f ".maw/handovers/ws-ws1.md" ]
+  [ -f ".maw/handovers/ws-ws1.json" ]
+}
+
+@test "maw handover --scope invalid でエラーになる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  run "$MAW_BIN" handover --workspace ws1 --scope invalid
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "不正な --scope 値" ]]
+}
+
+# ===== Phase 5: maw takeover =====
+
+@test "maw takeover がプロンプト形式で出力する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" takeover ws1
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "# Resume:" ]]
+}
+
+@test "maw takeover --format json が JSON を出力する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" takeover ws1 --format json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq . >/dev/null 2>&1
+}
+
+@test "maw takeover --format md が Markdown を出力する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" takeover ws1 --format md
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "# Handover:" ]]
+}
+
+@test "handover JSON がない状態で maw takeover はエラーになる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  run "$MAW_BIN" takeover ws1
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "見つかりません" ]]
+}
