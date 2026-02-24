@@ -27,6 +27,27 @@ This file defines context-specific extension rules for SKILL schema, contract de
 ### R-E2E-PORTABLE-001 (SHOULD)
 - Screenshot validation SHOULD be tool-agnostic and expressed as capability requirements.
 
+## 13. maw Workspace Rules
+### R-MAW-INIT-001 (MUST)
+- If `.maw/` exists in the repository, run `maw status` before starting any work to understand the current workspace and claim state.
+
+### R-MAW-CLAIM-001 (MUST)
+- Before editing any file that may be shared with parallel agents, run `maw claim <file>`.
+- If a claim conflict occurs (another workspace already holds the claim), stop editing and report to the user with: the conflicting file path, the workspace name, the agent name, and the expiry time.
+- This is the concrete implementation of R-COLLAB-001.
+
+### R-MAW-CLAIM-UNCLAIM-001 (SHOULD)
+- Release claims via `maw unclaim` when a file is no longer being actively edited, to minimize the lock surface area for other agents.
+
+### R-MAW-DONE-001 (MUST)
+- When work is complete, run `maw handover` to generate a handover document before closing the session.
+
+### R-MAW-MERGE-001 (MUST)
+- Branch merges MUST go through `maw merge`. Direct `git merge` bypasses claim cleanup and workspace lifecycle management.
+
+### R-MAW-DOCTOR-001 (SHOULD)
+- Run `maw doctor` at the start of a session when `.maw/` exists. Run `maw doctor --fix` when integrity issues are detected before beginning work.
+
 ## 4. Team Orchestration Rules
 ### R-TEAM-EXEC-001 (MUST)
 - Environment-dependent steps (commit/diagram commit) MUST be conditional.
