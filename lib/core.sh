@@ -284,16 +284,32 @@ detect_current_workspace() {
   return 1
 }
 
-# パス正規化 (絶対→相対、./ 除去、末尾 / 保持)
+# パス正規化 (絶対→相対、./ 除去、末尾 / 保持、セキュリティチェック付き)
 normalize_claim_path() {
   local root="$1"
   local input="$2"
 
   local result="$input"
 
+  # セキュリティ: ../ チェック（パストラバーサル対策）
+  if [[ "$result" == *"../"* ]]; then
+    log_error "パスに '../' は使用できません（パストラバーサル対策）。"
+    return 1
+  fi
+
   # 絶対パスなら root からの相対パスに変換
   if [[ "$result" == /* ]]; then
     result="${result#${root}/}"
+
+    # 絶対パスが root 外を参照していないかチェック
+    local full_path="${root}/${result}"
+    local resolved
+    resolved="$(realpath "$full_path" 2>/dev/null)" || resolved="$full_path"
+
+    if [[ "$resolved" != "${root}"* ]]; then
+      log_error "パスがプロジェクトルート外を参照しています。"
+      return 1
+    fi
   fi
 
   # ./ プレフィックス除去

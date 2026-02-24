@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # doctor.sh - maw doctor コマンド
 
+# shellcheck source=lib/validate.sh
+source "${LIB_DIR}/validate.sh"
+
 cmd_doctor() {
   local fix=false
 
@@ -94,7 +97,7 @@ cmd_doctor() {
             if [[ "$fix" == true ]]; then
               rm -f "$link"
               local rel_path
-              rel_path="$(python3 -c "import os.path; print(os.path.relpath('${source_dir}', '${ws_path}'))" 2>/dev/null)" || \
+              rel_path="$(calculate_relative_path "$source_dir" "$ws_path")" || \
               rel_path="../../${dir}"
               ln -s "$rel_path" "$link"
               log_success "  -> symlink を修復しました"
@@ -106,7 +109,7 @@ cmd_doctor() {
           ((issues++)) || true
           if [[ "$fix" == true ]]; then
             local rel_path
-            rel_path="$(python3 -c "import os.path; print(os.path.relpath('${source_dir}', '${ws_path}'))" 2>/dev/null)" || \
+            rel_path="$(calculate_relative_path "$source_dir" "$ws_path")" || \
             rel_path="../../${dir}"
             ln -s "$rel_path" "$link"
             log_success "  -> symlink を作成しました"

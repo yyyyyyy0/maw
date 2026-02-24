@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # unclaim.sh - maw unclaim コマンド
 
+# shellcheck source=lib/validate.sh
+source "${LIB_DIR}/validate.sh"
+
 cmd_unclaim() {
   local target=""
   local workspace=""
@@ -48,7 +51,10 @@ cmd_unclaim() {
     fi
   fi
 
-  # パス正規化
+  # パスバリデーションと正規化（セキュリティ対策）
+  if ! validate_claim_path "$root" "$target"; then
+    exit 1
+  fi
   local claim_path
   claim_path="$(normalize_claim_path "$root" "$target")"
 

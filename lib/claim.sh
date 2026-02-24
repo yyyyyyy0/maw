@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # claim.sh - maw claim コマンド
 
+# shellcheck source=lib/validate.sh
+source "${LIB_DIR}/validate.sh"
+
 cmd_claim() {
   local target=""
   local workspace=""
@@ -59,7 +62,10 @@ cmd_claim() {
   local agent
   agent="$(echo "$state" | jq -r --arg name "$workspace" '.workspaces[$name].agent // ""')"
 
-  # パス正規化
+  # パスバリデーションと正規化（セキュリティ対策）
+  if ! validate_claim_path "$root" "$target"; then
+    exit 1
+  fi
   local claim_path
   claim_path="$(normalize_claim_path "$root" "$target")"
 

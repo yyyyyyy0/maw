@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # spawn.sh - maw spawn コマンド
 
+# shellcheck source=lib/validate.sh
+source "${LIB_DIR}/validate.sh"
+
 cmd_spawn() {
   local name=""
   local branch=""
@@ -53,6 +56,11 @@ cmd_spawn() {
   local root
   root="$(require_maw_root)"
 
+  # ワークスペース名バリデーション（セキュリティ対策）
+  if ! validate_workspace_name "$name"; then
+    exit 1
+  fi
+
   # 重複チェック
   local ws_path="${root}/${MAW_WORKSPACES_DIR}/${name}"
   if [[ -d "$ws_path" ]]; then
@@ -103,10 +111,9 @@ cmd_spawn() {
             rm -rf "$target_link"
           fi
 
-          # 相対パスで symlink
+          # 相対パスで symlink（安全な関数使用）
           local rel_path
-          rel_path="$(python3 -c "import os.path; print(os.path.relpath('${source_dir}', '${ws_path}'))" 2>/dev/null)" || \
-          rel_path="$(realpath --relative-to="$ws_path" "$source_dir" 2>/dev/null)" || \
+          rel_path="$(calculate_relative_path "$source_dir" "$ws_path")" || \
           rel_path="../../${dir}"
 
           ln -s "$rel_path" "$target_link"

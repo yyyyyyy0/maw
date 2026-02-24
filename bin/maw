@@ -17,6 +17,9 @@ LIB_DIR="${MAW_DIR}/lib"
 # shellcheck source=lib/core.sh
 source "${LIB_DIR}/core.sh"
 
+# shellcheck source=lib/validate.sh
+source "${LIB_DIR}/validate.sh"
+
 usage() {
   cat <<EOF
 maw - Multi-Agent Workspace manager v${MAW_VERSION}

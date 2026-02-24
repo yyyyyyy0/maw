@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-02-24
+
+### Fixed
+- **セキュリティ修正**: Python コードインジェクションの脆弱性（HIGH）
+  - 相対パス計算を環境変数経由で安全に実行する `calculate_relative_path()` 関数を追加
+  - `lib/spawn.sh`, `lib/doctor.sh` で脆弱な Python コマンドを置換
+- **セキュリティ修正**: パストラバーサル保護の欠如（MEDIUM）
+  - `normalize_claim_path()` に `../` チェックと realpath 境界検証を追加
+  - `validate_claim_path()` 関数で claim パスのバリデーションを強化
+- **セキュリティ修正**: 入力バリデーションの不足（MEDIUM）
+  - `validate_workspace_name()` 関数でワークスペース名のバリデーションを追加
+  - 予約語、文字種、長さのチェックを実装
+
+### Added
+- `lib/validate.sh`: 入力バリデーションライブラリ
+  - `validate_workspace_name()`: ワークスペース名バリデーション
+  - `validate_claim_path()`: claim パスバリデーション
+  - `calculate_relative_path()`: 安全な相対パス計算
+- `tests/security_test.bats`: セキュリティテスト（30 ケース追加）
+- `docs/ja/security.md`: セキュリティドキュメント
+
+### Changed
+- `lib/spawn.sh`: ワークスペース名バリデーションを追加、安全な相対パス計算を使用
+- `lib/doctor.sh`: 安全な相対パス計算を使用
+- `lib/claim.sh`, `lib/unclaim.sh`: `validate_claim_path()` を使用
+- README.md: セキュリティドキュメントへのリンクを追加
+
 ## [0.5.0] - 2026-02-24
 
 ### Added

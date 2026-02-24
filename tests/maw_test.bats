@@ -112,43 +112,43 @@ teardown() {
 
 @test "maw spawn でワークスペースが作成される" {
   "$MAW_BIN" init
-  run "$MAW_BIN" spawn test-ws
+  run "$MAW_BIN" spawn test_ws
   [ "$status" -eq 0 ]
-  [ -d ".maw-workspaces/test-ws" ]
+  [ -d ".maw-workspaces/test_ws" ]
 }
 
 @test "maw spawn --agent でブランチ名にエージェント名が含まれる" {
   "$MAW_BIN" init
-  run "$MAW_BIN" spawn test-ws --agent claude
+  run "$MAW_BIN" spawn test_ws --agent claude
   [ "$status" -eq 0 ]
   local branch
-  branch="$(jq -r '.workspaces["test-ws"].branch' .maw/state.json)"
-  [ "$branch" = "claude/test-ws" ]
+  branch="$(jq -r '.workspaces["test_ws"].branch' .maw/state.json)"
+  [ "$branch" = "claude/test_ws" ]
 }
 
 @test "maw spawn --issue でブランチ名に Issue 番号が含まれる" {
   "$MAW_BIN" init
-  run "$MAW_BIN" spawn test-ws --issue 42
+  run "$MAW_BIN" spawn test_ws --issue 42
   [ "$status" -eq 0 ]
   local branch
-  branch="$(jq -r '.workspaces["test-ws"].branch' .maw/state.json)"
-  [ "$branch" = "issue/42-test-ws" ]
+  branch="$(jq -r '.workspaces["test_ws"].branch' .maw/state.json)"
+  [ "$branch" = "issue/42-test_ws" ]
 }
 
 @test "maw spawn --agent --issue で両方が含まれる" {
   "$MAW_BIN" init
-  run "$MAW_BIN" spawn test-ws --agent claude --issue 42
+  run "$MAW_BIN" spawn test_ws --agent claude --issue 42
   [ "$status" -eq 0 ]
   local branch
-  branch="$(jq -r '.workspaces["test-ws"].branch' .maw/state.json)"
-  [ "$branch" = "claude/issue-42-test-ws" ]
+  branch="$(jq -r '.workspaces["test_ws"].branch' .maw/state.json)"
+  [ "$branch" = "claude/issue-42-test_ws" ]
 }
 
 @test "maw spawn で state.json が更新される" {
   "$MAW_BIN" init
-  "$MAW_BIN" spawn test-ws
+  "$MAW_BIN" spawn test_ws
   local status_val
-  status_val="$(jq -r '.workspaces["test-ws"].status' .maw/state.json)"
+  status_val="$(jq -r '.workspaces["test_ws"].status' .maw/state.json)"
   [ "$status_val" = "active" ]
 }
 
@@ -156,24 +156,24 @@ teardown() {
   "$MAW_BIN" init
   mkdir -p node_modules
   echo "test" > node_modules/.package-lock.json
-  "$MAW_BIN" spawn test-ws
-  [ -L ".maw-workspaces/test-ws/node_modules" ]
+  "$MAW_BIN" spawn test_ws
+  [ -L ".maw-workspaces/test_ws/node_modules" ]
 }
 
 @test "maw spawn の重複はエラーを返す" {
   "$MAW_BIN" init
-  "$MAW_BIN" spawn test-ws
-  run "$MAW_BIN" spawn test-ws
+  "$MAW_BIN" spawn test_ws
+  run "$MAW_BIN" spawn test_ws
   [ "$status" -eq 1 ]
   [[ "$output" =~ "既に存在" ]]
 }
 
 @test "maw spawn --branch でブランチ名を直接指定" {
   "$MAW_BIN" init
-  run "$MAW_BIN" spawn test-ws --branch custom-branch
+  run "$MAW_BIN" spawn test_ws --branch custom-branch
   [ "$status" -eq 0 ]
   local branch
-  branch="$(jq -r '.workspaces["test-ws"].branch' .maw/state.json)"
+  branch="$(jq -r '.workspaces["test_ws"].branch' .maw/state.json)"
   [ "$branch" = "custom-branch" ]
 }
 
@@ -207,12 +207,12 @@ teardown() {
 
 @test "maw cleanup で特定のワークスペースが削除される" {
   "$MAW_BIN" init
-  "$MAW_BIN" spawn test-ws
-  run "$MAW_BIN" cleanup test-ws
+  "$MAW_BIN" spawn test_ws
+  run "$MAW_BIN" cleanup test_ws
   [ "$status" -eq 0 ]
-  [ ! -d ".maw-workspaces/test-ws" ]
+  [ ! -d ".maw-workspaces/test_ws" ]
   local ws
-  ws="$(jq -r '.workspaces["test-ws"]' .maw/state.json)"
+  ws="$(jq -r '.workspaces["test_ws"]' .maw/state.json)"
   [ "$ws" = "null" ]
 }
 
@@ -228,10 +228,10 @@ teardown() {
 
 @test "maw cleanup --dry-run で削除されない" {
   "$MAW_BIN" init
-  "$MAW_BIN" spawn test-ws
-  run "$MAW_BIN" cleanup test-ws --dry-run
+  "$MAW_BIN" spawn test_ws
+  run "$MAW_BIN" cleanup test_ws --dry-run
   [ "$status" -eq 0 ]
-  [ -d ".maw-workspaces/test-ws" ]
+  [ -d ".maw-workspaces/test_ws" ]
   [[ "$output" =~ "dry-run" ]]
 }
 
@@ -253,9 +253,9 @@ teardown() {
 
 @test "maw doctor は orphaned state を検出する" {
   "$MAW_BIN" init
-  "$MAW_BIN" spawn test-ws
+  "$MAW_BIN" spawn test_ws
   # worktree を手動で削除して orphaned 状態にする
-  rm -rf ".maw-workspaces/test-ws"
+  rm -rf ".maw-workspaces/test_ws"
   git worktree prune
   run "$MAW_BIN" doctor
   [ "$status" -eq 0 ]
@@ -264,13 +264,13 @@ teardown() {
 
 @test "maw doctor --fix は orphaned state を修復する" {
   "$MAW_BIN" init
-  "$MAW_BIN" spawn test-ws
-  rm -rf ".maw-workspaces/test-ws"
+  "$MAW_BIN" spawn test_ws
+  rm -rf ".maw-workspaces/test_ws"
   git worktree prune
   run "$MAW_BIN" doctor --fix
   [ "$status" -eq 0 ]
   local ws
-  ws="$(jq -r '.workspaces["test-ws"]' .maw/state.json)"
+  ws="$(jq -r '.workspaces["test_ws"]' .maw/state.json)"
   [ "$ws" = "null" ]
 }
 
@@ -524,14 +524,14 @@ teardown() {
 
 @test "maw merge でブランチが main にマージされる" {
   "$MAW_BIN" init
-  "$MAW_BIN" spawn test-ws
+  "$MAW_BIN" spawn test_ws
   # ワークスペース内でコミット作成
-  cd ".maw-workspaces/test-ws"
+  cd ".maw-workspaces/test_ws"
   echo "merged content" > merged.txt
   git add merged.txt
   git commit -m "test commit for merge"
   cd "$TEST_DIR"
-  run "$MAW_BIN" merge test-ws
+  run "$MAW_BIN" merge test_ws
   [ "$status" -eq 0 ]
   # main でコミットが存在することを確認
   run git log --oneline
@@ -540,71 +540,71 @@ teardown() {
 
 @test "maw merge 後にワークスペースが削除される" {
   "$MAW_BIN" init
-  "$MAW_BIN" spawn test-ws
-  cd ".maw-workspaces/test-ws"
+  "$MAW_BIN" spawn test_ws
+  cd ".maw-workspaces/test_ws"
   echo "x" > x.txt
   git add x.txt
   git commit -m "test"
   cd "$TEST_DIR"
-  run "$MAW_BIN" merge test-ws
+  run "$MAW_BIN" merge test_ws
   [ "$status" -eq 0 ]
-  [ ! -d ".maw-workspaces/test-ws" ]
+  [ ! -d ".maw-workspaces/test_ws" ]
   local ws
-  ws="$(jq -r '.workspaces["test-ws"]' .maw/state.json)"
+  ws="$(jq -r '.workspaces["test_ws"]' .maw/state.json)"
   [ "$ws" = "null" ]
 }
 
 @test "maw merge --no-cleanup でワークスペースが保持される" {
   "$MAW_BIN" init
-  "$MAW_BIN" spawn test-ws
-  cd ".maw-workspaces/test-ws"
+  "$MAW_BIN" spawn test_ws
+  cd ".maw-workspaces/test_ws"
   echo "x" > x.txt
   git add x.txt
   git commit -m "test"
   cd "$TEST_DIR"
-  run "$MAW_BIN" merge test-ws --no-cleanup
+  run "$MAW_BIN" merge test_ws --no-cleanup
   [ "$status" -eq 0 ]
-  [ -d ".maw-workspaces/test-ws" ]
+  [ -d ".maw-workspaces/test_ws" ]
 }
 
 @test "maw merge --dry-run では実際のマージが実行されない" {
   "$MAW_BIN" init
-  "$MAW_BIN" spawn test-ws
-  cd ".maw-workspaces/test-ws"
+  "$MAW_BIN" spawn test_ws
+  cd ".maw-workspaces/test_ws"
   echo "x" > x.txt
   git add x.txt
   git commit -m "dry-run test commit"
   cd "$TEST_DIR"
-  run "$MAW_BIN" merge test-ws --dry-run
+  run "$MAW_BIN" merge test_ws --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" =~ "dry-run" ]]
   # ワークスペースが残っていることを確認
-  [ -d ".maw-workspaces/test-ws" ]
+  [ -d ".maw-workspaces/test_ws" ]
   # ブランチがマージされていないことを確認
   run git branch --merged
-  [[ ! "$output" =~ "maw/test-ws" ]]
+  [[ ! "$output" =~ "maw/test_ws" ]]
 }
 
 @test "maw merge で未コミット変更がある場合はエラー" {
   "$MAW_BIN" init
-  "$MAW_BIN" spawn test-ws
+  "$MAW_BIN" spawn test_ws
   # 未コミットのファイルを作成
-  echo "dirty" > ".maw-workspaces/test-ws/dirty.txt"
-  run "$MAW_BIN" merge test-ws
+  echo "dirty" > ".maw-workspaces/test_ws/dirty.txt"
+  run "$MAW_BIN" merge test_ws
   [ "$status" -eq 1 ]
   [[ "$output" =~ "未コミット" ]]
 }
 
 @test "maw merge 後に claims が削除される" {
   "$MAW_BIN" init
-  "$MAW_BIN" spawn test-ws --agent claude
-  "$MAW_BIN" claim src/auth.ts --workspace test-ws
-  cd ".maw-workspaces/test-ws"
+  "$MAW_BIN" spawn test_ws --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace test_ws
+  cd ".maw-workspaces/test_ws"
   echo "x" > x.txt
   git add x.txt
   git commit -m "test"
   cd "$TEST_DIR"
-  run "$MAW_BIN" merge test-ws
+  run "$MAW_BIN" merge test_ws
   [ "$status" -eq 0 ]
   local count
   count="$(jq '.claims | length' .maw/claims.json)"
