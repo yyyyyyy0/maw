@@ -35,10 +35,10 @@ jobs:
           echo '{}' > package.json && echo '# test' > yarn.lock
           git add . && git commit -m "initial"
 
-          /Users/nil/src/maw/bin/maw init
-          /Users/nil/src/maw/bin/maw spawn test-ws --agent claude --issue 1
-          /Users/nil/src/maw/bin/maw handover test-ws
-          /Users/nil/src/maw/bin/maw takeover test-ws --format plan | jq '.workspace'
+          bin/maw init
+          bin/maw spawn test_ws --agent claude --issue 1
+          bin/maw handover test_ws
+          bin/maw takeover test_ws --format plan | jq '.workspace'
 
       - name: Test doctor JSON
         run: |
@@ -48,5 +48,5 @@ jobs:
           git config user.name "Test User"
           echo '{}' > package.json && git add . && git commit -m "init"
 
-          /Users/nil/src/maw/bin/maw init
-          /Users/nil/src/maw/bin/maw doctor --json | jq '.version'
+          bin/maw init
+          bin/maw doctor --json | jq '.version'
