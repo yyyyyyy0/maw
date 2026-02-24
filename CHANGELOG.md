@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.1] - 2026-02-25
 
 ### Added
 - **Handover `--blocked-by` オプション**: `maw handover` に作業ブロック要因を記録するオプションを追加
@@ -12,6 +12,7 @@
 ### Changed
 - `lib/handover.sh`: `--blocked-by` 引数と追加ロジックを実装
 - `lib/doctor.sh`: JSON 出力モードで exit code を返すように変更
+- `tests/maw_test.bats`: 関連テスト5件追加、version 期待値修正
 - `docs/ja/commands.md`, `docs/en/commands.md`: `--blocked-by` と `doctor --json` exit code のドキュメント追加
 
 ## [0.6.0] - 2026-02-24
