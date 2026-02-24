@@ -24,7 +24,7 @@ git clone https://github.com/yyyyyyy0/maw.git ~/.maw-cli
 
 ```bash
 maw --version
-# => maw version 0.4.1
+# => maw version 0.5.1
 ```
 
 ## ステップ 1: プロジェクトを初期化する
@@ -135,7 +135,28 @@ maw handover
 - claims 状態
 - 引き継ぎメモ（自由記述プレースホルダー）
 
-## ステップ 7: ブランチをマージする
+## ステップ 7: セッションを引き継ぐ（takeover）
+
+別のエージェントが作業を引き継ぐ場合、handover bundle を読み込んでセッション再開プロンプトを生成します:
+
+```bash
+maw takeover feature-auth
+```
+
+出力されるプロンプトには以下が含まれます:
+- ブランチ情報・エージェント・Issue 番号
+- 作業状態（clean/dirty/stash）
+- アクティブな claims 一覧
+- コミット履歴・変更ファイル
+- next_steps（引き継ぎメモ）
+
+フォーマットオプション:
+```bash
+maw takeover feature-auth --format json   # JSON を確認
+maw takeover feature-auth --format md     # Markdown を確認
+```
+
+## ステップ 8: ブランチをマージする
 
 ```bash
 # main ブランチへマージ（自動 cleanup 付き）
@@ -153,7 +174,7 @@ maw merge feature-auth --dry-run
 
 マージ後、当該ワークスペースの claims が自動削除されます。
 
-## ステップ 8: クリーンアップ
+## ステップ 9: クリーンアップ
 
 ```bash
 maw cleanup feature-auth        # 特定 WS を削除

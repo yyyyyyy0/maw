@@ -24,7 +24,7 @@ Verify installation:
 
 ```bash
 maw --version
-# => maw version 0.4.1
+# => maw version 0.5.1
 ```
 
 ## Step 1: Initialize Your Project
@@ -135,7 +135,28 @@ This creates `.maw/handovers/ws-feature-auth.md` containing:
 - Claims state
 - Notes (free-form placeholder)
 
-## Step 7: Merge the Branch
+## Step 7: Resume Session (takeover)
+
+When another agent takes over the work, load the handover bundle to generate a session resumption prompt:
+
+```bash
+maw takeover feature-auth
+```
+
+The generated prompt includes:
+- Branch info, agent name, issue number
+- Work status (clean/dirty/stash)
+- Active claims list
+- Commit history and changed files
+- next_steps (handover notes)
+
+Format options:
+```bash
+maw takeover feature-auth --format json   # View JSON
+maw takeover feature-auth --format md     # View Markdown
+```
+
+## Step 8: Merge the Branch
 
 ```bash
 # Merge into main (with auto cleanup)
@@ -153,7 +174,7 @@ maw merge feature-auth --dry-run
 
 After a successful merge, the workspace's claims are automatically deleted.
 
-## Step 8: Cleanup
+## Step 9: Cleanup
 
 ```bash
 maw cleanup feature-auth        # Remove a specific WS

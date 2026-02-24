@@ -46,8 +46,9 @@ maw status
 # ファイルを排他宣言してから編集
 maw claim src/auth.ts
 
-# 引き継ぎ → マージ → クリーンアップ
+# 引き継ぎ → セッション再開 → マージ → クリーンアップ
 maw handover
+maw takeover feature-auth
 maw merge feature-auth
 ```
 
