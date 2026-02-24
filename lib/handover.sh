@@ -5,6 +5,13 @@ cmd_handover() {
   local workspace=""
   local scope="full"
   local validate_name=""
+  local edit_mode=false
+  local next_step=""
+  local decision=""
+  local risk=""
+  local risk_severity="medium"
+  local resume_command=""
+  local verification_status=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -21,15 +28,66 @@ cmd_handover() {
         validate_name="$2"
         shift 2
         ;;
+      --next-step)
+        edit_mode=true
+        next_step="$2"
+        shift 2
+        ;;
+      --decision)
+        edit_mode=true
+        decision="$2"
+        shift 2
+        ;;
+      --risk)
+        edit_mode=true
+        risk="$2"
+        shift 2
+        ;;
+      --risk-severity)
+        risk_severity="$2"
+        case "$risk_severity" in
+          low|medium|high|critical) ;;
+          *)
+            log_error "不正な --risk-severity 値: ${risk_severity} (low|medium|high|critical)"
+            exit 1
+            ;;
+        esac
+        shift 2
+        ;;
+      --resume-command)
+        edit_mode=true
+        resume_command="$2"
+        shift 2
+        ;;
+      --verification-status)
+        edit_mode=true
+        verification_status="$2"
+        case "$verification_status" in
+          pending|passed|failed|skipped) ;;
+          *)
+            log_error "不正な --verification-status 値: ${verification_status} (pending|passed|failed|skipped)"
+            exit 1
+            ;;
+        esac
+        shift 2
+        ;;
       -h|--help)
-        echo "Usage: maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <name>]"
+        echo "Usage: maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <name>] [edit options]"
         echo ""
         echo "引き継ぎドキュメントを生成または検証します。"
         echo ""
         echo "Options:"
-        echo "  --workspace <name>  ワークスペース名 (省略時は自動検出)"
-        echo "  --scope <mode>      出力スコープ (full|summary|evidence, デフォルト: full)"
-        echo "  --validate <name>   handover JSON を検証"
+        echo "  --workspace <name>         ワークスペース名 (省略時は自動検出)"
+        echo "  --scope <mode>             出力スコープ (full|summary|evidence, デフォルト: full)"
+        echo "  --validate <name>          handover JSON を検証"
+        echo ""
+        echo "Edit options (handover JSON を更新):"
+        echo "  --next-step <text>         next_steps 配列に追加"
+        echo "  --decision <text>          decisions 配列に追加（タイムスタンプ付き）"
+        echo "  --risk <text>              risks 配列に追加（--risk-severity で重要度指定）"
+        echo "  --risk-severity <level>    リスク重要度 (low|medium|high|critical, デフォルト: medium)"
+        echo "  --resume-command <cmd>     resume_commands 配列に追加"
+        echo "  --verification-status <s>  verification_status を更新 (pending|passed|failed|skipped)"
         return 0
         ;;
       -*)
@@ -58,6 +116,12 @@ cmd_handover() {
     validate_handover_json "$json_file"
     log_success "validation passed"
     return 0
+  fi
+
+  # --edit モード（handover JSON を更新）
+  if [[ "$edit_mode" == true ]]; then
+    cmd_handover_edit "$root" "$workspace" "$next_step" "$decision" "$risk" "$risk_severity" "$resume_command" "$verification_status"
+    return $?
   fi
 
   local root
@@ -304,4 +368,105 @@ cmd_handover() {
     echo "$json" > "$json_file"
     log_success "handover JSON 生成: ${json_file}"
   fi
+}
+
+# handover JSON 編集モード
+cmd_handover_edit() {
+  local root="$1"
+  local workspace="$2"
+  local next_step="$3"
+  local decision="$4"
+  local risk="$5"
+  local risk_severity="$6"
+  local resume_command="$7"
+  local verification_status="$8"
+
+  # ワークスペース検出
+  if [[ -z "$workspace" ]]; then
+    if ! workspace="$(detect_current_workspace "$root")"; then
+      log_error "ワークスペースを検出できません。--workspace で指定してください。"
+      exit 1
+    fi
+  fi
+
+  local json_file="${root}/${MAW_HANDOVERS_DIR}/ws-${workspace}.json"
+  if [[ ! -f "$json_file" ]]; then
+    log_error "handover JSON が見つかりません: ${json_file}"
+    exit 1
+  fi
+
+  # JSON を読み込んで更新
+  local json_data
+  json_data="$(cat "$json_file")"
+
+  local updated=false
+  local now
+  now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  # version チェックと v1→v2 互換性処理
+  local version
+  version="$(echo "$json_data" | jq -r '.version // 1')"
+  if [[ "$version" == "1" ]]; then
+    json_data="$(echo "$json_data" | jq '
+      .decisions = [] |
+      .risks = [] |
+      .blocked_by = [] |
+      .resume_commands = [] |
+      .verification_status = "pending"
+    ')"
+  fi
+
+  # next_steps に追加
+  if [[ -n "$next_step" ]]; then
+    json_data="$(echo "$json_data" | jq --arg step "$next_step" '.next_steps += [$step]')"
+    log_success "next_step を追加: ${next_step}"
+    updated=true
+  fi
+
+  # decisions に追加
+  if [[ -n "$decision" ]]; then
+    json_data="$(echo "$json_data" | jq --arg desc "$decision" --arg ts "$now" \
+      '.decisions += [{"description": $desc, "timestamp": $ts}]')"
+    log_success "decision を追加: ${decision}"
+    updated=true
+  fi
+
+  # risks に追加
+  if [[ -n "$risk" ]]; then
+    json_data="$(echo "$json_data" | jq --arg desc "$risk" --arg sev "$risk_severity" --arg ts "$now" \
+      '.risks += [{"description": $desc, "severity": $sev, "timestamp": $ts}]')"
+    log_success "risk を追加: ${risk} (severity: ${risk_severity})"
+    updated=true
+  fi
+
+  # resume_commands に追加
+  if [[ -n "$resume_command" ]]; then
+    json_data="$(echo "$json_data" | jq --arg cmd "$resume_command" '.resume_commands += [$cmd]')"
+    log_success "resume_command を追加: ${resume_command}"
+    updated=true
+  fi
+
+  # verification_status を更新
+  if [[ -n "$verification_status" ]]; then
+    json_data="$(echo "$json_data" | jq --arg status "$verification_status" '.verification_status = $status')"
+    log_success "verification_status を更新: ${verification_status}"
+    updated=true
+  fi
+
+  if [[ "$updated" == false ]]; then
+    log_error "編集オプションが指定されていません。"
+    exit 1
+  fi
+
+  # 検証
+  # shellcheck source=lib/validate.sh
+  source "${LIB_DIR}/validate.sh"
+  local tmp_file
+  tmp_file="$(mktemp)"
+  echo "$json_data" > "$tmp_file"
+  validate_handover_json "$tmp_file"
+
+  # アトミックに書き戻す
+  mv "$tmp_file" "$json_file"
+  log_success "handover JSON を更新: ${json_file}"
 }

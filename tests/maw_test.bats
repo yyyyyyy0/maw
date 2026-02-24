@@ -907,3 +907,211 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" =~ "見つかりません" ]]
 }
+
+# ===== Phase 6: Handover 編集フラグ =====
+
+@test "maw handover --next-step で next_steps に追加される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" handover --workspace ws1 --next-step "テストを実装する"
+  [ "$status" -eq 0 ]
+  local steps
+  steps="$(jq -r '.next_steps[0]' .maw/handovers/ws-ws1.json)"
+  [ "$steps" = "テストを実装する" ]
+}
+
+@test "maw handover --decision で decisions に追加される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" handover --workspace ws1 --decision "jsonwebtoken を使用する"
+  [ "$status" -eq 0 ]
+  local decision
+  decision="$(jq -r '.decisions[0].description' .maw/handovers/ws-ws1.json)"
+  [ "$decision" = "jsonwebtoken を使用する" ]
+  local ts
+  ts="$(jq -r '.decisions[0].timestamp' .maw/handovers/ws-ws1.json)"
+  [ "$ts" != "null" ]
+}
+
+@test "maw handover --risk で risks に追加される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" handover --workspace ws1 --risk "トークン有効期限の設定" --risk-severity high
+  [ "$status" -eq 0 ]
+  local risk
+  risk="$(jq -r '.risks[0].description' .maw/handovers/ws-ws1.json)"
+  [ "$risk" = "トークン有効期限の設定" ]
+  local severity
+  severity="$(jq -r '.risks[0].severity' .maw/handovers/ws-ws1.json)"
+  [ "$severity" = "high" ]
+}
+
+@test "maw handover --resume-command で resume_commands に追加される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" handover --workspace ws1 --resume-command "npm test"
+  [ "$status" -eq 0 ]
+  local cmd
+  cmd="$(jq -r '.resume_commands[0]' .maw/handovers/ws-ws1.json)"
+  [ "$cmd" = "npm test" ]
+}
+
+@test "maw handover --verification-status で更新される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" handover --workspace ws1 --verification-status passed
+  [ "$status" -eq 0 ]
+  local status
+  status="$(jq -r '.verification_status' .maw/handovers/ws-ws1.json)"
+  [ "$status" = "passed" ]
+}
+
+@test "maw handover --risk-severity 不正値でエラー" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" handover --workspace ws1 --risk "test" --risk-severity invalid
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "不正な --risk-severity 値" ]]
+}
+
+@test "maw handover --verification-status 不正値でエラー" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" handover --workspace ws1 --verification-status invalid
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "不正な --verification-status 値" ]]
+}
+
+@test "maw handover 編集オプションなしでエラー" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  cd ".maw-workspaces/ws1"
+  run "$MAW_BIN" handover --next-step
+  [ "$status" -eq 1 ]
+}
+
+# ===== Phase 6: Takeover plan スコアリング =====
+
+@test "maw takeover --format plan で score と category が出力される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" takeover ws1 --format plan
+  [ "$status" -eq 0 ]
+  echo "$output" | jq '.score' >/dev/null 2>&1
+  echo "$output" | jq '.category' >/dev/null 2>&1
+}
+
+@test "takeover plan の ready カテゴリ (スコア 80+)" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  # verification_status=passed にしてスコアを上げる
+  "$MAW_BIN" handover --workspace ws1 --verification-status passed
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+  local category
+  category="$(echo "$output" | jq -r '.category')"
+  [ "$category" = "ready" ] || [ "$category" = "caution" ]
+}
+
+@test "takeover plan の blocked カテゴリ (スコア 0-49)" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  # state を dirty にするために未コミット変更を作成
+  echo "dirty" > ".maw-workspaces/ws1/dirty.txt"
+  # dirty 状態で handover 生成
+  "$MAW_BIN" handover --workspace ws1
+  # failed と critical risk でスコアを下げる
+  "$MAW_BIN" handover --workspace ws1 --verification-status failed
+  "$MAW_BIN" handover --workspace ws1 --risk "重大な問題" --risk-severity critical
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+  local category
+  category="$(echo "$output" | jq -r '.category')"
+  [ "$category" = "blocked" ]
+}
+
+# ===== Phase 6: Doctor JSON v2 =====
+
+@test "maw doctor --json で version 2 が出力される" {
+  "$MAW_BIN" init
+  run "$MAW_BIN" doctor --json
+  [ "$status" -eq 0 ]
+  local version
+  version="$(echo "$output" | jq -r '.version')"
+  [ "$version" -eq 2 ]
+}
+
+@test "doctor JSON v2 に format フィールドがある" {
+  "$MAW_BIN" init
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+  local format
+  format="$(echo "$output" | jq -r '.format')"
+  [ "$format" = "doctor" ]
+}
+
+@test "doctor JSON v2 に maw_version フィールドがある" {
+  "$MAW_BIN" init
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+  local maw_ver
+  maw_ver="$(echo "$output" | jq -r '.maw_version')"
+  [ "$maw_ver" != "null" ]
+  [ -n "$maw_ver" ]
+}
+
+@test "doctor JSON v2 に health_score フィールドがある" {
+  "$MAW_BIN" init
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+  local health
+  health="$(echo "$output" | jq -r '.health_score')"
+  [ "$health" -ge 0 ]
+  [ "$health" -le 100 ]
+}
+
+@test "doctor JSON v2 に categories オブジェクトがある" {
+  "$MAW_BIN" init
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+  echo "$output" | jq '.categories.worktree' >/dev/null 2>&1
+  echo "$output" | jq '.categories.symlink' >/dev/null 2>&1
+  echo "$output" | jq '.categories.lockfile' >/dev/null 2>&1
+  echo "$output" | jq '.categories.git' >/dev/null 2>&1
+  echo "$output" | jq '.categories.claims' >/dev/null 2>&1
+  echo "$output" | jq '.categories.stale_claims' >/dev/null 2>&1
+}
+
+@test "doctor JSON v2 のカテゴリに status と score がある" {
+  "$MAW_BIN" init
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+  local status score
+  status="$(echo "$output" | jq -r '.categories.worktree.status')"
+  score="$(echo "$output" | jq -r '.categories.worktree.score')"
+  [ "$status" = "passed" ] || [ "$status" = "warning" ] || [ "$status" = "failed" ]
+  [ "$score" -ge 0 ]
+  [ "$score" -le 100 ]
+}
+
+@test "doctor JSON v2 の checks に category フィールドがある" {
+  "$MAW_BIN" init
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+  local count
+  count="$(echo "$output" | jq '.checks | length')"
+  [ "$count" -gt 0 ]
+  local category
+  category="$(echo "$output" | jq -r '.checks[0].category')"
+  [ "$category" != "null" ]
+}

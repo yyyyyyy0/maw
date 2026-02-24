@@ -1,0 +1,52 @@
+name: Smoke Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+          git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
+
+      - name: Test version
+        run: |
+          output="$(bin/maw --version)"
+          [[ "$output" =~ ^maw\ v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+
+      - name: Test help
+        run: bin/maw --help | grep -q "Usage:"
+
+      - name: Test init -> spawn -> handover -> takeover flow
+        run: |
+          cd /tmp && TEST_DIR=$(mktemp -d) && cd "$TEST_DIR"
+          git init --initial-branch=main
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo '{}' > package.json && echo '# test' > yarn.lock
+          git add . && git commit -m "initial"
+
+          /Users/nil/src/maw/bin/maw init
+          /Users/nil/src/maw/bin/maw spawn test-ws --agent claude --issue 1
+          /Users/nil/src/maw/bin/maw handover test-ws
+          /Users/nil/src/maw/bin/maw takeover test-ws --format plan | jq '.workspace'
+
+      - name: Test doctor JSON
+        run: |
+          cd /tmp && TEST_DIR=$(mktemp -d) && cd "$TEST_DIR"
+          git init --initial-branch=main
+          git config user.email "test@example.com"
+          git config user.name "Test User"
+          echo '{}' > package.json && git add . && git commit -m "init"
+
+          /Users/nil/src/maw/bin/maw init
+          /Users/nil/src/maw/bin/maw doctor --json | jq '.version'

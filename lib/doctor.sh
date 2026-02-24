@@ -272,12 +272,16 @@ cmd_doctor_json_output() {
   local total_checks=0 passed=0 failed=0 warnings=0 fixable=0
   local checks_json="[]"
 
+  # カテゴリ別スコア
+  local worktree_score=100 symlink_score=100 lockfile_score=100 git_score=100 claims_score=100 stale_claims_score=100
+
   # チェック関数（共通ロジックを抽出）
   run_check() {
     local name="$1"
     local status="$2"  # passed|failed|warning
     local message="$3"
     local fixable_bool="$4"
+    local category="$5"  # worktree|symlink|lockfile|git|claims|stale_claims
 
     ((total_checks++)) || true
     case "$status" in
@@ -292,48 +296,263 @@ cmd_doctor_json_output() {
     [[ "$status" == "warning" ]] && severity="warning"
 
     checks_json="$(echo "$checks_json" | jq --arg name "$name" --arg status "$status" \
-      --arg severity "$severity" --arg message "$message" --argjson fixable "$fixable_bool" \
-      '. += [{name: $name, status: $status, severity: $severity, message: $message, fixable: $fixable}]')"
+      --arg severity "$severity" --arg message "$message" --argjson fixable "$fixable_bool" --arg cat "$category" \
+      '. += [{name: $name, status: $status, severity: $severity, message: $message, fixable: $fixable, category: $cat}]')"
+
+    # カテゴリスコア更新（failed は 0、warning は 70、passed は 100）
+    case "$status" in
+      failed)
+        case "$category" in
+          worktree) worktree_score=0 ;;
+          symlink) symlink_score=0 ;;
+          lockfile) lockfile_score=0 ;;
+          git) git_score=0 ;;
+          claims) claims_score=0 ;;
+          stale_claims) stale_claims_score=0 ;;
+        esac
+        ;;
+      warning)
+        case "$category" in
+          worktree) [[ $worktree_score -gt 70 ]] && worktree_score=70 ;;
+          symlink) [[ $symlink_score -gt 70 ]] && symlink_score=70 ;;
+          lockfile) [[ $lockfile_score -gt 70 ]] && lockfile_score=70 ;;
+          git) [[ $git_score -gt 70 ]] && git_score=70 ;;
+          claims) [[ $claims_score -gt 70 ]] && claims_score=70 ;;
+          stale_claims) [[ $stale_claims_score -gt 70 ]] && stale_claims_score=70 ;;
+        esac
+        ;;
+    esac
   }
 
   local state
   state="$(read_state "$root")"
 
   # 1. Worktree 整合性チェック
+  local worktree_check_done=false
   while IFS= read -r name; do
     local ws_path="${root}/${MAW_WORKSPACES_DIR}/${name}"
     if [[ ! -d "$ws_path" ]]; then
-      run_check "worktree_integrity" "failed" "orphaned state: '${name}'" true
+      run_check "worktree_integrity" "failed" "orphaned state: '${name}'" true "worktree"
+      worktree_check_done=true
     fi
   done < <(echo "$state" | jq -r '.workspaces | keys[]' 2>/dev/null)
 
-  # まだ成功していれば成功として記録
-  if [[ "$passed" -eq 0 && "$failed" -eq 0 && "$warnings" -eq 0 ]]; then
-    run_check "worktree_integrity" "passed" "All worktrees match state.json" false
+  if [[ "$worktree_check_done" == false ]]; then
+    run_check "worktree_integrity" "passed" "All worktrees match state.json" false "worktree"
   fi
+
+  # 2. Symlink 整合性チェック
+  local symlink_dirs
+  symlink_dirs="$(read_config "$root" '.symlinkDirs[]' 2>/dev/null)" || true
+  if [[ -n "$symlink_dirs" ]]; then
+    local symlink_issue=false
+    while IFS= read -r name; do
+      local ws_path="${root}/${MAW_WORKSPACES_DIR}/${name}"
+      [[ -d "$ws_path" ]] || continue
+      while IFS= read -r dir; do
+        local link="${ws_path}/${dir}"
+        local source_dir="${root}/${dir}"
+        if [[ -L "$link" ]]; then
+          local target resolved expected
+          target="$(readlink "$link")"
+          resolved="$(cd "$ws_path" && realpath "$target" 2>/dev/null)" || resolved=""
+          expected="$(realpath "$source_dir" 2>/dev/null)" || expected=""
+          if [[ "$resolved" != "$expected" ]]; then
+            symlink_issue=true
+          fi
+        elif [[ -d "$source_dir" && ! -e "$link" ]]; then
+          symlink_issue=true
+        fi
+      done <<< "$symlink_dirs"
+    done < <(echo "$state" | jq -r '.workspaces | keys[]' 2>/dev/null)
+
+    if [[ "$symlink_issue" == true ]]; then
+      run_check "symlink_integrity" "warning" "symlink issues detected" true "symlink"
+      symlink_score=70
+    else
+      run_check "symlink_integrity" "passed" "All symlinks are valid" false "symlink"
+    fi
+  else
+    run_check "symlink_integrity" "passed" "No symlink dirs configured" false "symlink"
+  fi
+
+  # 3. Lockfile hash チェック
+  local pm
+  pm="$(read_config "$root" '.packageManager')"
+  if [[ -n "$pm" && "$pm" != "null" && "$pm" != "" ]]; then
+    local lockfile_path
+    lockfile_path="$(get_lockfile_path "$root" "$pm")"
+    local saved_hash=""
+    if [[ -f "${root}/${MAW_LOCKFILE_HASH}" ]]; then
+      saved_hash="$(cat "${root}/${MAW_LOCKFILE_HASH}")"
+    fi
+    if [[ -n "$lockfile_path" && -f "$lockfile_path" ]]; then
+      local current_hash
+      current_hash="$(compute_lockfile_hash "$lockfile_path")"
+      if [[ -n "$saved_hash" && -n "$current_hash" && "$saved_hash" != "$current_hash" ]]; then
+        run_check "lockfile_hash" "warning" "lockfile changed" true "lockfile"
+        lockfile_score=70
+      else
+        run_check "lockfile_hash" "passed" "lockfile hash matches" false "lockfile"
+      fi
+    else
+      run_check "lockfile_hash" "passed" "No lockfile found" false "lockfile"
+    fi
+  else
+    run_check "lockfile_hash" "passed" "No package manager detected" false "lockfile"
+  fi
+
+  # 4. Git worktree prune チェック
+  local prune_output
+  prune_output="$(cd "$root" && git worktree list --porcelain 2>/dev/null | grep -c "^worktree")" || prune_output="0"
+  local stale
+  stale="$(cd "$root" && git worktree list 2>/dev/null | grep -c "prunable")" || stale="0"
+  if [[ "$stale" -gt 0 ]]; then
+    run_check "git_worktree_prune" "warning" "${stale} prunable worktree(s)" true "git"
+    git_score=70
+  else
+    run_check "git_worktree_prune" "passed" "No prunable worktrees" false "git"
+  fi
+
+  # 5. Claims 整合性チェック
+  local claims
+  claims="$(read_claims "$root")"
+  state="$(read_state "$root")"
+  local orphan_claims=()
+  while IFS= read -r claim_ws; do
+    [[ -z "$claim_ws" ]] && continue
+    if ! echo "$state" | jq -e --arg name "$claim_ws" '.workspaces[$name]' &>/dev/null; then
+      orphan_claims+=("$claim_ws")
+    fi
+  done < <(echo "$claims" | jq -r '.claims[].workspace' 2>/dev/null | sort -u)
+
+  if [[ ${#orphan_claims[@]} -gt 0 ]]; then
+    run_check "claims_integrity" "failed" "${#orphan_claims[@]} orphan claim(s)" true "claims"
+    claims_score=0
+  else
+    run_check "claims_integrity" "passed" "All claims valid" false "claims"
+  fi
+
+  # 6. Stale claims チェック
+  local stale_count=0
+  while IFS=$'\t' read -r claim_path expires_at; do
+    [[ -z "$claim_path" ]] && continue
+    if is_claim_expired "$expires_at"; then
+      ((stale_count++)) || true
+    fi
+  done < <(echo "$claims" | jq -r '.claims | to_entries[] | [.key, (.value.expires_at // "")] | @tsv' 2>/dev/null)
+
+  if [[ "$stale_count" -gt 0 ]]; then
+    run_check "stale_claims" "warning" "${stale_count} expired claim(s)" true "stale_claims"
+    stale_claims_score=80
+  else
+    run_check "stale_claims" "passed" "No expired claims" false "stale_claims"
+  fi
+
+  # health_score 計算（カテゴリスコアの平均）
+  local health_score
+  health_score=$(((worktree_score + symlink_score + lockfile_score + git_score + claims_score + stale_claims_score) / 6))
 
   # 出力
   local now
   now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
+  # maw_version 取得
+  local maw_version="${MAW_VERSION:-unknown}"
+
+  # カテゴリステータス判定
+  if [[ $worktree_score -eq 100 ]]; then
+    worktree_status="passed"
+  elif [[ $worktree_score -eq 0 ]]; then
+    worktree_status="failed"
+  else
+    worktree_status="warning"
+  fi
+
+  if [[ $symlink_score -eq 100 ]]; then
+    symlink_status="passed"
+  elif [[ $symlink_score -eq 0 ]]; then
+    symlink_status="failed"
+  else
+    symlink_status="warning"
+  fi
+
+  if [[ $lockfile_score -eq 100 ]]; then
+    lockfile_status="passed"
+  elif [[ $lockfile_score -eq 0 ]]; then
+    lockfile_status="failed"
+  else
+    lockfile_status="warning"
+  fi
+
+  if [[ $git_score -eq 100 ]]; then
+    git_status="passed"
+  elif [[ $git_score -eq 0 ]]; then
+    git_status="failed"
+  else
+    git_status="warning"
+  fi
+
+  if [[ $claims_score -eq 100 ]]; then
+    claims_status="passed"
+  elif [[ $claims_score -eq 0 ]]; then
+    claims_status="failed"
+  else
+    claims_status="warning"
+  fi
+
+  if [[ $stale_claims_score -eq 100 ]]; then
+    stale_claims_status="passed"
+  elif [[ $stale_claims_score -eq 0 ]]; then
+    stale_claims_status="failed"
+  else
+    stale_claims_status="warning"
+  fi
+
   jq -n \
-    --argjson version 1 \
+    --argjson version 2 \
+    --arg format "doctor" \
     --arg timestamp "$now" \
+    --arg maw_version "$maw_version" \
+    --argjson health_score "$health_score" \
     --argjson total_checks "$total_checks" \
     --argjson passed "$passed" \
     --argjson failed "$failed" \
     --argjson warnings "$warnings" \
     --argjson fixable "$fixable" \
+    --arg worktree_status "$worktree_status" \
+    --argjson worktree_score "$worktree_score" \
+    --arg symlink_status "$symlink_status" \
+    --argjson symlink_score "$symlink_score" \
+    --arg lockfile_status "$lockfile_status" \
+    --argjson lockfile_score "$lockfile_score" \
+    --arg git_status "$git_status" \
+    --argjson git_score "$git_score" \
+    --arg claims_status "$claims_status" \
+    --argjson claims_score "$claims_score" \
+    --arg stale_claims_status "$stale_claims_status" \
+    --argjson stale_claims_score "$stale_claims_score" \
     --argjson checks "$checks_json" \
     '{
       version: $version,
+      format: $format,
       timestamp: $timestamp,
+      maw_version: $maw_version,
+      health_score: $health_score,
       summary: {
         total_checks: $total_checks,
         passed: $passed,
         failed: $failed,
         warnings: $warnings,
         fixable: $fixable
+      },
+      categories: {
+        worktree: {status: $worktree_status, score: $worktree_score},
+        symlink: {status: $symlink_status, score: $symlink_score},
+        lockfile: {status: $lockfile_status, score: $lockfile_score},
+        git: {status: $git_status, score: $git_score},
+        claims: {status: $claims_status, score: $claims_score},
+        stale_claims: {status: $stale_claims_status, score: $stale_claims_score}
       },
       checks: $checks
     }'

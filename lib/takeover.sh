@@ -119,30 +119,93 @@ cmd_takeover() {
 generate_takeover_plan() {
   local json_data="$1"
 
-  local workspace branch verification_status
+  local workspace branch verification_status state
   local decisions_count risks_count blockers_count
   local resume_commands_json
 
   workspace="$(echo "$json_data" | jq -r '.workspace')"
   branch="$(echo "$json_data" | jq -r '.branch')"
   verification_status="$(echo "$json_data" | jq -r '.verification_status // "pending"')"
+  state="$(echo "$json_data" | jq -r '.state // "clean"')"
   decisions_count="$(echo "$json_data" | jq -r '.decisions | length')"
   risks_count="$(echo "$json_data" | jq -r '.risks | length')"
   blockers_count="$(echo "$json_data" | jq -r '.blocked_by | length')"
   resume_commands_json="$(echo "$json_data" | jq -r '.resume_commands // []')"
 
+  # 重み付けスコアリング
+  local verification_score state_score blockers_score risks_score total_score category
+
+  # 1. verification_status (40%)
+  case "$verification_status" in
+    passed) verification_score=100 ;;
+    skipped) verification_score=50 ;;
+    pending) verification_score=30 ;;
+    failed) verification_score=0 ;;
+    *) verification_score=30 ;;
+  esac
+
+  # 2. state (20%)
+  case "$state" in
+    clean) state_score=100 ;;
+    stash) state_score=60 ;;
+    dirty) state_score=40 ;;
+    *) state_score=50 ;;
+  esac
+
+  # 3. blockers_count (20%)
+  if [[ "$blockers_count" -eq 0 ]]; then
+    blockers_score=100
+  elif [[ "$blockers_count" -le 2 ]]; then
+    blockers_score=50
+  else
+    blockers_score=0
+  fi
+
+  # 4. risks (20%) - 各リスクで減点
+  local risk_penalty=0
+  if [[ "$risks_count" -gt 0 ]]; then
+    while IFS= read -r severity; do
+      case "$severity" in
+        low) ((risk_penalty += 5)) || true ;;
+        medium) ((risk_penalty += 10)) || true ;;
+        high) ((risk_penalty += 20)) || true ;;
+        critical) ((risk_penalty += 40)) || true ;;
+      esac
+    done < <(echo "$json_data" | jq -r '.risks[].severity // "medium"')
+  fi
+  risks_score=$((100 - risk_penalty))
+  [[ "$risks_score" -lt 0 ]] && risks_score=0
+
+  # 総合スコア計算（加重平均）
+  total_score=$(((verification_score * 40 + state_score * 20 + blockers_score * 20 + risks_score * 20) / 100))
+
+  # カテゴリ判定
+  if [[ "$total_score" -ge 80 ]]; then
+    category="ready"
+  elif [[ "$total_score" -ge 50 ]]; then
+    category="caution"
+  else
+    category="blocked"
+  fi
+
   # priority_actions 生成
   local priority_actions
   priority_actions="$(jq -n '[]')"
 
-  if [[ "$verification_status" == "pending" ]]; then
-    priority_actions="$(echo "$priority_actions" | jq '. += [{"action": "verify", "description": "テストを実行してください"}]')"
+  if [[ "$category" == "ready" ]]; then
+    priority_actions="$(echo "$priority_actions" | jq '. += [{"action": "start", "description": "作業を開始できます", "priority": "high"}]')"
+  elif [[ "$category" == "caution" ]]; then
+    priority_actions="$(echo "$priority_actions" | jq '. += [{"action": "review", "description": "注意点を確認してください", "priority": "medium"}]')"
+  else
+    priority_actions="$(echo "$priority_actions" | jq '. += [{"action": "resolve", "description": "ブロッカーを解決してください", "priority": "high"}]')"
   fi
 
-  if [[ "$blockers_count" -eq 0 ]]; then
-    priority_actions="$(echo "$priority_actions" | jq '. += [{"action": "unblock", "description": "ブロッカーなし - 開始可能"}]')"
-  else
-    priority_actions="$(echo "$priority_actions" | jq '. += [{"action": "unblock", "description": "ブロッカーを解決してください"}]')"
+  if [[ "$verification_status" == "pending" ]]; then
+    priority_actions="$(echo "$priority_actions" | jq '. += [{"action": "verify", "description": "テストを実行してください", "priority": "medium"}]')"
+  fi
+
+  if [[ "$blockers_count" -gt 0 ]]; then
+    priority_actions="$(echo "$priority_actions" | jq '. += [{"action": "unblock", "description": "ブロッカーを解決してください", "priority": "high"}]')"
   fi
 
   # 出力
@@ -150,18 +213,24 @@ generate_takeover_plan() {
     --arg workspace "$workspace" \
     --arg branch "$branch" \
     --arg verification_status "$verification_status" \
+    --arg state "$state" \
     --argjson decisions_count "$decisions_count" \
     --argjson risks_count "$risks_count" \
     --argjson blockers_count "$blockers_count" \
+    --argjson score "$total_score" \
+    --arg category "$category" \
     --argjson priority_actions "$priority_actions" \
     --argjson resume_commands "$resume_commands_json" \
     '{
       workspace: $workspace,
       branch: $branch,
       verification_status: $verification_status,
+      state: $state,
       decisions_count: $decisions_count,
       risks_count: $risks_count,
       blockers_count: $blockers_count,
+      score: $score,
+      category: $category,
       priority_actions: $priority_actions,
       resume_commands: $resume_commands
     }'

@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-02-24
+
+### Added
+- **Handover 編集フラグ**: `maw handover` に JSON を直接編集するオプションを追加
+  - `--next-step <text>`: next_steps 配列に追加
+  - `--decision <text>`: decisions 配列に追加（タイムスタンプ付き）
+  - `--risk <text>`: risks 配列に追加
+  - `--risk-severity <level>`: リスク重要度 (low|medium|high|critical)
+  - `--resume-command <cmd>`: resume_commands 配列に追加
+  - `--verification-status <s>`: verification_status を更新 (pending|passed|failed|skipped)
+- **Takeover Plan 優先順位ロジック強化**: スコアリングシステム導入
+  - 総合スコア (0-100) を計算
+  - カテゴリ判定: ready (80-100), caution (50-79), blocked (0-49)
+  - 各要素の重み付け: verification_status (40%), state (20%), blockers (20%), risks (20%)
+- **Doctor JSON v2**: スキーマ拡張
+  - `format`: "doctor" フィールド追加
+  - `maw_version`: maw バージョン情報追加
+  - `health_score`: 全体ヘルススコア (0-100) 追加
+  - `categories`: カテゴリ別ステータスとスコア追加 (worktree, symlink, lockfile, git, claims, stale_claims)
+  - 各チェックに category フィールド追加
+- **Smoke Test CI**: 基本的な機能をテストする GitHub Actions workflow 追加
+
+### Changed
+- `lib/handover.sh`: 引数パースと編集モード実装
+- `lib/takeover.sh`: generate_takeover_plan をスコアリングベースに変更
+- `lib/doctor.sh`: cmd_doctor_json_output を v2 スキーマに変更
+
+## [0.5.1] - 2026-02-24
+
 ## [0.5.1] - 2026-02-24
 
 ### Fixed

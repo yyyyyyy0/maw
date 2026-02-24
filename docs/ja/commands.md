@@ -227,12 +227,12 @@ maw unclaim src/auth.ts --force       # 他 WS の claim も強制解除
 
 ## `maw handover [options]`
 
-引き継ぎドキュメントを生成します。Markdown ファイルに加えて JSON サイドカーも出力します（v0.5.0 以降）。
+引き継ぎドキュメントを生成・編集します。Markdown ファイルに加えて JSON サイドカーも出力します（v0.5.0 以降）。
 
 ### 概要
 
 ```bash
-maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <name>]
+maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <name>] [edit options]
 ```
 
 ### オプション
@@ -242,6 +242,17 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
 | `--workspace <name>` | ワークスペース名を明示指定 | 現在の WS を自動検出 |
 | `--scope <mode>` | 出力スコープを指定 | `full` |
 | `--validate <name>` | handover JSON の整合性を検証（生成は行わない） | — |
+
+### 編集オプション（v0.6.0 以降）
+
+| オプション | 説明 |
+|-----------|------|
+| `--next-step <text>` | next_steps 配列に追加 |
+| `--decision <text>` | decisions 配列に追加（タイムスタンプ付き） |
+| `--risk <text>` | risks 配列に追加 |
+| `--risk-severity <level>` | リスク重要度 (low\|medium\|high\|critical, デフォルト: medium) |
+| `--resume-command <cmd>` | resume_commands 配列に追加 |
+| `--verification-status <s>` | verification_status を更新 (pending\|passed\|failed\|skipped) |
 
 ### --scope モード
 
@@ -335,9 +346,41 @@ maw takeover [<name>] [--format md|json|prompt]
 | モード | 説明 |
 |--------|------|
 | `prompt` | エージェント向けセッション再開プロンプト（構造化テキスト） |
-| `plan` | プラン情報を JSON 形式で出力（verification_status、decisions_count など） |
+| `plan` | プラン情報を JSON 形式で出力（score, category, verification_status など）※ v0.6.0 以降 |
 | `json` | JSON サイドカーをそのまま出力（`jq .` 整形済み） |
 | `md` | Markdown handover ファイルをそのまま出力 |
+
+### --format plan 出力例 (v0.6.0 以降)
+
+```json
+{
+  "workspace": "feature-auth",
+  "branch": "claude/feature-auth",
+  "verification_status": "pending",
+  "state": "clean",
+  "decisions_count": 2,
+  "risks_count": 1,
+  "blockers_count": 0,
+  "score": 72,
+  "category": "caution",
+  "priority_actions": [
+    {"action": "review", "description": "注意点を確認してください", "priority": "medium"},
+    {"action": "verify", "description": "テストを実行してください", "priority": "medium"}
+  ],
+  "resume_commands": ["npm test", "npm run build"]
+}
+```
+
+**スコアリング基準**:
+- `verification_status` (40%): passed=100, skipped=50, pending=30, failed=0
+- `state` (20%): clean=100, stash=60, dirty=40
+- `blockers_count` (20%): 0=100, 1-2=50, 3+=0
+- `risks` (20%): 各リスクで減点 (low=5, medium=10, high=20, critical=40)
+
+**カテゴリ判定**:
+- `ready` (80-100): 作業開始可能
+- `caution` (50-79): 注意点あり
+- `blocked` (0-49): ブロック済み
 
 ### 使用例
 
@@ -459,7 +502,7 @@ maw doctor [--fix] [--aggressive] [--json]
 |-----------|------|
 | `--fix` | 検出された問題を自動修復 |
 | `--aggressive` | マージ済みブランチ・dangling worktree の削除チェック（`--fix` 時に確認プロンプト付きで削除実行） |
-| `--json` | 結果を JSON 形式で出力 |
+| `--json` | 結果を JSON 形式で出力（v2 スキーマ、v0.6.0 以降） |
 
 ### チェック項目
 
@@ -488,6 +531,50 @@ maw doctor [--fix] [--aggressive] [--json]
 [OK] worktree integrity: OK
 [OK] symlink integrity: OK
 ```
+
+### --json 出力スキーマ (v2, v0.6.0 以降)
+
+```json
+{
+  "version": 2,
+  "format": "doctor",
+  "timestamp": "2026-02-24T10:00:00Z",
+  "maw_version": "0.6.0",
+  "health_score": 85,
+  "summary": {
+    "total_checks": 6,
+    "passed": 4,
+    "failed": 1,
+    "warnings": 1,
+    "fixable": 1
+  },
+  "categories": {
+    "worktree": {"status": "passed", "score": 100},
+    "symlink": {"status": "warning", "score": 70},
+    "lockfile": {"status": "passed", "score": 100},
+    "git": {"status": "passed", "score": 100},
+    "claims": {"status": "failed", "score": 0},
+    "stale_claims": {"status": "warning", "score": 80}
+  },
+  "checks": [
+    {
+      "name": "worktree_integrity",
+      "status": "passed",
+      "severity": "none",
+      "message": "All worktrees match state.json",
+      "fixable": false,
+      "category": "worktree"
+    }
+  ]
+}
+```
+
+**フィールド説明**:
+- `health_score`: 全体ヘルススコア (0-100、カテゴリスコアの平均)
+- `categories`: カテゴリ別ステータスとスコア
+  - `status`: passed / warning / failed
+  - `score`: 0-100 (failed=0, warning=70, passed=100)
+- `checks[].category`: 各チェックが属するカテゴリ
 
 ---
 

@@ -227,12 +227,12 @@ maw unclaim src/auth.ts --force       # force-release any claim
 
 ## `maw handover [options]`
 
-Generate a handover document. In addition to Markdown, a JSON sidecar is also produced (v0.5.0+).
+Generate or edit a handover document. In addition to Markdown, a JSON sidecar is also produced (v0.5.0+).
 
 ### Synopsis
 
 ```bash
-maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <name>]
+maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <name>] [edit options]
 ```
 
 ### Options
@@ -242,6 +242,17 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
 | `--workspace <name>` | Explicitly specify workspace name | auto-detect from current dir |
 | `--scope <mode>` | Output scope | `full` |
 | `--validate <name>` | Validate handover JSON integrity (no generation) | — |
+
+### Edit Options (v0.6.0+)
+
+| Option | Description |
+|--------|-------------|
+| `--next-step <text>` | Add to next_steps array |
+| `--decision <text>` | Add to decisions array (with timestamp) |
+| `--risk <text>` | Add to risks array |
+| `--risk-severity <level>` | Risk severity (low\|medium\|high\|critical, default: medium) |
+| `--resume-command <cmd>` | Add to resume_commands array |
+| `--verification-status <s>` | Update verification_status (pending\|passed\|failed\|skipped) |
 
 ### --scope Modes
 
@@ -335,9 +346,41 @@ maw takeover [<name>] [--format md|json|prompt]
 | Mode | Description |
 |------|-------------|
 | `prompt` | Structured session-resume prompt for agents |
-| `plan` | Plan information as JSON (verification_status, decisions_count, etc.) |
+| `plan` | Plan information as JSON (score, category, verification_status, etc.) — v0.6.0+ |
 | `json` | Raw JSON sidecar output (pretty-printed via `jq .`) |
 | `md` | Raw Markdown handover file output |
+
+### --format plan Output Example (v0.6.0+)
+
+```json
+{
+  "workspace": "feature-auth",
+  "branch": "claude/feature-auth",
+  "verification_status": "pending",
+  "state": "clean",
+  "decisions_count": 2,
+  "risks_count": 1,
+  "blockers_count": 0,
+  "score": 72,
+  "category": "caution",
+  "priority_actions": [
+    {"action": "review", "description": "Please review the considerations", "priority": "medium"},
+    {"action": "verify", "description": "Please run tests", "priority": "medium"}
+  ],
+  "resume_commands": ["npm test", "npm run build"]
+}
+```
+
+**Scoring Criteria**:
+- `verification_status` (40%): passed=100, skipped=50, pending=30, failed=0
+- `state` (20%): clean=100, stash=60, dirty=40
+- `blockers_count` (20%): 0=100, 1-2=50, 3+=0
+- `risks` (20%): Deduct per risk (low=5, medium=10, high=20, critical=40)
+
+**Category Determination**:
+- `ready` (80-100): Ready to start work
+- `caution` (50-79): Some considerations needed
+- `blocked` (0-49): Blocked, needs resolution
 
 ### Examples
 
@@ -459,7 +502,7 @@ maw doctor [--fix] [--aggressive] [--json]
 |--------|-------------|
 | `--fix` | Auto-repair detected issues |
 | `--aggressive` | Check merged branches & dangling worktrees (with confirmation prompt when using `--fix`) |
-| `--json` | Output results in JSON format |
+| `--json` | Output results in JSON format (v2 schema, v0.6.0+) |
 
 ### Checks Performed
 
@@ -488,6 +531,50 @@ maw doctor [--fix] [--aggressive] [--json]
 [OK] worktree integrity: OK
 [OK] symlink integrity: OK
 ```
+
+### --json Output Schema (v2, v0.6.0+)
+
+```json
+{
+  "version": 2,
+  "format": "doctor",
+  "timestamp": "2026-02-24T10:00:00Z",
+  "maw_version": "0.6.0",
+  "health_score": 85,
+  "summary": {
+    "total_checks": 6,
+    "passed": 4,
+    "failed": 1,
+    "warnings": 1,
+    "fixable": 1
+  },
+  "categories": {
+    "worktree": {"status": "passed", "score": 100},
+    "symlink": {"status": "warning", "score": 70},
+    "lockfile": {"status": "passed", "score": 100},
+    "git": {"status": "passed", "score": 100},
+    "claims": {"status": "failed", "score": 0},
+    "stale_claims": {"status": "warning", "score": 80}
+  },
+  "checks": [
+    {
+      "name": "worktree_integrity",
+      "status": "passed",
+      "severity": "none",
+      "message": "All worktrees match state.json",
+      "fixable": false,
+      "category": "worktree"
+    }
+  ]
+}
+```
+
+**Field Descriptions**:
+- `health_score`: Overall health score (0-100, average of category scores)
+- `categories`: Status and score per category
+  - `status`: passed / warning / failed
+  - `score`: 0-100 (failed=0, warning=70, passed=100)
+- `checks[].category`: Category each check belongs to
 
 ---
 
