@@ -1152,6 +1152,170 @@ teardown() {
   [ "$blockers_count" -eq 1 ]
 }
 
+@test "maw takeover --format plan で blocker 0件は空配列" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local blockers_count
+  blockers_count="$(echo "$output" | jq -r '.blockers_count')"
+  [ "$blockers_count" -eq 0 ]
+
+  local blockers
+  blockers="$(echo "$output" | jq -r '.blockers | length')"
+  [ "$blockers" -eq 0 ]
+}
+
+@test "maw takeover --format plan で blocker 1件は1件表示" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Single Blocker"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local blockers_count
+  blockers_count="$(echo "$output" | jq -r '.blockers_count')"
+  [ "$blockers_count" -eq 1 ]
+
+  local blockers
+  blockers="$(echo "$output" | jq -r '.blockers | length')"
+  [ "$blockers" -eq 1 ]
+
+  local first
+  first="$(echo "$output" | jq -r '.blockers[0]')"
+  [ "$first" = "Single Blocker" ]
+}
+
+@test "maw takeover --format plan で blocker 4件は上位3件のみ表示" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker 1"
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker 2"
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker 3"
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker 4"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  # blockers_count は全件
+  local blockers_count
+  blockers_count="$(echo "$output" | jq -r '.blockers_count')"
+  [ "$blockers_count" -eq 4 ]
+
+  # blockers 配列は上位3件のみ
+  local blockers
+  blockers="$(echo "$output" | jq -r '.blockers | length')"
+  [ "$blockers" -eq 3 ]
+
+  # 順序維持確認
+  local first
+  first="$(echo "$output" | jq -r '.blockers[0]')"
+  [ "$first" = "Blocker 1" ]
+}
+
+@test "maw handover --unblock で blocker が削除される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker A"
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker B"
+
+  # Execute: A を削除
+  run "$MAW_BIN" handover --workspace ws1 --unblock "Blocker A"
+  [ "$status" -eq 0 ]
+
+  # Verify: B のみ残る
+  local count
+  count="$(jq '.blocked_by | length' .maw/handovers/ws-ws1.json)"
+  [ "$count" -eq 1 ]
+  local remaining
+  remaining="$(jq -r '.blocked_by[0]' .maw/handovers/ws-ws1.json)"
+  [ "$remaining" = "Blocker B" ]
+}
+
+@test "maw handover --unblock で部分一致で削除される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "PR #123 マージ待ち"
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker B"
+
+  # 部分一致 "123" で削除
+  run "$MAW_BIN" handover --workspace ws1 --unblock "123"
+  [ "$status" -eq 0 ]
+
+  local count
+  count="$(jq '.blocked_by | length' .maw/handovers/ws-ws1.json)"
+  [ "$count" -eq 1 ]
+}
+
+@test "maw handover --unblock で大文字小文字区別なし" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "PR #ABC"
+
+  # 小文字で指定しても削除される
+  run "$MAW_BIN" handover --workspace ws1 --unblock "abc"
+  [ "$status" -eq 0 ]
+
+  local count
+  count="$(jq '.blocked_by | length' .maw/handovers/ws-ws1.json)"
+  [ "$count" -eq 0 ]
+}
+
+@test "maw handover --unblock で存在しない blocker は安全に無視" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker A"
+
+  # 存在しない blocker を指定してもエラーにならない
+  run "$MAW_BIN" handover --workspace ws1 --unblock "NonExistent"
+  [ "$status" -eq 0 ]
+
+  # 元の blocker は残ったまま
+  local count
+  count="$(jq '.blocked_by | length' .maw/handovers/ws-ws1.json)"
+  [ "$count" -eq 1 ]
+}
+
+@test "maw handover --clear-blockers で全 blocker が削除される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker A"
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker B"
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker C"
+
+  run "$MAW_BIN" handover --workspace ws1 --clear-blockers
+  [ "$status" -eq 0 ]
+
+  local count
+  count="$(jq '.blocked_by | length' .maw/handovers/ws-ws1.json)"
+  [ "$count" -eq 0 ]
+}
+
+@test "maw handover --clear-blockers で blocker 空でも安全" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  # blocker がない状態でクリアしてもエラーにならない
+  run "$MAW_BIN" handover --workspace ws1 --clear-blockers
+  [ "$status" -eq 0 ]
+
+  local count
+  count="$(jq '.blocked_by | length' .maw/handovers/ws-ws1.json)"
+  [ "$count" -eq 0 ]
+}
+
 # ===== Phase 6: Doctor --json exit code =====
 
 @test "maw doctor --json は問題なしで exit 0" {
@@ -1171,4 +1335,57 @@ teardown() {
   local failed
   failed="$(echo "$output" | jq -r '.summary.failed')"
   [ "$failed" -gt 0 ]
+}
+
+@test "maw doctor --json --exit-code-mode simple は warning-only で exit 0" {
+  "$MAW_BIN" init
+  # lockfile 変更で warning を作成
+  echo "# changed" >> yarn.lock
+  git add yarn.lock
+  git commit -m "change lockfile"
+
+  run "$MAW_BIN" doctor --json --exit-code-mode simple
+  [ "$status" -eq 0 ]
+
+  # JSON は parse 可能
+  echo "$output" | jq . >/dev/null
+}
+
+@test "maw doctor --json --exit-code-mode simple は failed で exit 1" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1
+  # orphaned state を作成
+  rm -rf ".maw-workspaces/ws1"
+  git worktree prune
+
+  run "$MAW_BIN" doctor --json --exit-code-mode simple
+  [ "$status" -eq 1 ]
+}
+
+@test "maw doctor --json --exit-code-mode multi は warning-only で exit 2" {
+  "$MAW_BIN" init
+  # lockfile 変更で warning を作成
+  echo "# changed" >> yarn.lock
+  git add yarn.lock
+  git commit -m "change lockfile"
+
+  run "$MAW_BIN" doctor --json --exit-code-mode multi
+  [ "$status" -eq 2 ]
+}
+
+@test "maw doctor --json --exit-code-mode multi は failed で exit 1" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1
+  rm -rf ".maw-workspaces/ws1"
+  git worktree prune
+
+  run "$MAW_BIN" doctor --json --exit-code-mode multi
+  [ "$status" -eq 1 ]
+}
+
+@test "maw doctor --json --exit-code-mode invalid でエラー" {
+  "$MAW_BIN" init
+  run "$MAW_BIN" doctor --json --exit-code-mode invalid
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "不正な --exit-code-mode 値" ]]
 }

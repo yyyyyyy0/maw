@@ -213,6 +213,54 @@ CI で `if: always()` などと組み合わせて結果をキャプチャ可能:
         run: maw doctor --json > health.json
 ```
 
+## Exit Code Contract
+
+`--exit-code-mode` で exit code 契約を制御できます。
+
+### Exit Code Table
+
+| Mode   | No issues | Warning only | Failed issues | Invalid mode |
+|--------|-----------|--------------|---------------|--------------|
+| simple | 0         | 0            | 1             | 1            |
+| multi  | 0         | 2            | 1             | 1            |
+
+### Mode 説明
+
+- **simple** (デフォルト): 問題があれば失敗 (exit 1)
+  - 警告のみの場合は成功 (exit 0)
+  - CI で「問題があれば失敗させたい」場合に適している
+
+- **multi**: 警告と失敗を区別
+  - 警告のみ: exit 2
+  - 失敗あり: exit 1
+  - CI で「警告は通知したいが失敗はさせたくない」場合に適している
+
+### CI Examples
+
+#### Simple mode (default) - fail on any issues
+
+```yaml
+- name: Health check (fail on issues)
+  run: |
+    maw doctor --json --exit-code-mode simple > health.json
+    # failed > 0 で exit 1 になるため、CI が失敗する
+```
+
+#### Multi mode - fail only on critical, notify on warnings
+
+```yaml
+- name: Health check (multi mode)
+  run: |
+    maw doctor --json --exit-code-mode multi > health.json
+    # failed > 0 で exit 1、warnings only で exit 2
+
+# 警告のみで CI を続ける場合
+- name: Health check (warnings allowed)
+  run: |
+    maw doctor --json --exit-code-mode multi || true
+    # exit 2 (warning only) を無視して続行
+```
+
 ## テスト・ステージへの統合
 
 ```yaml
