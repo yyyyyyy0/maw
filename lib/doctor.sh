@@ -8,19 +8,31 @@ cmd_doctor() {
   local fix=false
   local aggressive=false
   local json_output=false
+  local exit_code_mode="simple"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --fix) fix=true; shift ;;
       --aggressive) aggressive=true; shift ;;
       --json) json_output=true; shift ;;
+      --exit-code-mode)
+        exit_code_mode="$2"
+        if [[ "$exit_code_mode" != "simple" && "$exit_code_mode" != "multi" ]]; then
+          log_error "不正な --exit-code-mode 値: ${exit_code_mode} (simple|multi)"
+          exit 1
+        fi
+        shift 2
+        ;;
       -h|--help)
-        echo "Usage: maw doctor [--fix] [--aggressive] [--json]"
+        echo "Usage: maw doctor [--fix] [--aggressive] [--json] [--exit-code-mode simple|multi]"
         echo ""
         echo "Options:"
-        echo "  --fix         検出された問題を自動修復"
-        echo "  --aggressive マージ済みブランチや dangling worktree を削除"
-        echo "  --json        JSON 形式で出力"
+        echo "  --fix               検出された問題を自動修復"
+        echo "  --aggressive        マージ済みブランチや dangling worktree を削除"
+        echo "  --json              JSON 形式で出力"
+        echo "  --exit-code-mode    Exit code モード (simple|multi, デフォルト: simple)"
+        echo "                      simple: 問題なし=0, 問題あり=1"
+        echo "                      multi:  問題なし=0, critical=1, warning=2"
         return 0
         ;;
       *)
@@ -35,7 +47,7 @@ cmd_doctor() {
 
   # --json モード
   if [[ "$json_output" == true ]]; then
-    cmd_doctor_json_output "$root"
+    cmd_doctor_json_output "$root" "$exit_code_mode"
     return 0
   fi
 
@@ -268,6 +280,7 @@ cmd_doctor() {
 # JSON 出力モード
 cmd_doctor_json_output() {
   local root="$1"
+  local exit_code_mode="$2"
 
   local total_checks=0 passed=0 failed=0 warnings=0 fixable=0
   local checks_json="[]"
@@ -562,9 +575,19 @@ cmd_doctor_json_output() {
   # 出力
   echo "$json_output"
 
-  # 問題検出時は非0終了
-  if [[ "$failed" -gt 0 ]]; then
-    exit 1
+  # Exit code 分岐
+  if [[ "$exit_code_mode" == "multi" ]]; then
+    # multi モード: critical=1, warning=2
+    if [[ "$failed" -gt 0 ]]; then
+      exit 1
+    elif [[ "$warnings" -gt 0 ]]; then
+      exit 2
+    fi
+  else
+    # simple モード（デフォルト）: 問題あり=1
+    if [[ "$failed" -gt 0 ]]; then
+      exit 1
+    fi
   fi
 }
 

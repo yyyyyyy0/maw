@@ -13,6 +13,8 @@ cmd_handover() {
   local resume_command=""
   local verification_status=""
   local blocked_by=""
+  local unblock=""
+  local clear_blockers=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -77,6 +79,16 @@ cmd_handover() {
         blocked_by="$2"
         shift 2
         ;;
+      --unblock)
+        edit_mode=true
+        unblock="$2"
+        shift 2
+        ;;
+      --clear-blockers)
+        edit_mode=true
+        clear_blockers=true
+        shift
+        ;;
       -h|--help)
         echo "Usage: maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <name>] [edit options]"
         echo ""
@@ -95,6 +107,8 @@ cmd_handover() {
         echo "  --resume-command <cmd>     resume_commands 配列に追加"
         echo "  --verification-status <s>  verification_status を更新 (pending|passed|failed|skipped)"
         echo "  --blocked-by <text>        blocked_by 配列に追加"
+        echo "  --unblock <text>           blocked_by 配列から要素を削除（部分一致）"
+        echo "  --clear-blockers           blocked_by 配列を空にする"
         return 0
         ;;
       -*)
@@ -127,7 +141,7 @@ cmd_handover() {
 
   # --edit モード（handover JSON を更新）
   if [[ "$edit_mode" == true ]]; then
-    cmd_handover_edit "$root" "$workspace" "$next_step" "$decision" "$risk" "$risk_severity" "$resume_command" "$verification_status" "$blocked_by"
+    cmd_handover_edit "$root" "$workspace" "$next_step" "$decision" "$risk" "$risk_severity" "$resume_command" "$verification_status" "$blocked_by" "$unblock" "$clear_blockers"
     return $?
   fi
 
@@ -388,6 +402,8 @@ cmd_handover_edit() {
   local resume_command="$7"
   local verification_status="$8"
   local blocked_by="$9"
+  local unblock="${10}"
+  local clear_blockers="${11}"
 
   # ワークスペース検出
   if [[ -z "$workspace" ]]; then
@@ -458,6 +474,30 @@ cmd_handover_edit() {
   if [[ -n "$blocked_by" ]]; then
     json_data="$(echo "$json_data" | jq --arg desc "$blocked_by" '.blocked_by += [$desc]')"
     log_success "blocked_by を追加: ${blocked_by}"
+    updated=true
+  fi
+
+  # blocked_by から要素を削除（部分一致）
+  if [[ -n "$unblock" ]]; then
+    # 文字列配列またはオブジェクト配列の description フィールドと部分一致
+    json_data="$(echo "$json_data" | jq --arg pattern "$unblock" '
+      .blocked_by |= map(
+        if type == "string" then
+          if test($pattern; "i") then empty else . end
+        else
+          if (.description | test($pattern; "i")) then empty else . end
+        end
+      ) |
+      if .blocked_by == null then .blocked_by = [] else . end
+    ')"
+    log_success "blocked_by から削除: ${unblock}"
+    updated=true
+  fi
+
+  # blocked_by をクリア
+  if [[ "$clear_blockers" == true ]]; then
+    json_data="$(echo "$json_data" | jq '.blocked_by = []')"
+    log_success "blocked_by をクリアしました"
     updated=true
   fi
 

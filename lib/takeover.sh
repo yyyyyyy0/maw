@@ -121,7 +121,7 @@ generate_takeover_plan() {
 
   local workspace branch verification_status state
   local decisions_count risks_count blockers_count
-  local resume_commands_json
+  local resume_commands_json blockers_json
 
   workspace="$(echo "$json_data" | jq -r '.workspace')"
   branch="$(echo "$json_data" | jq -r '.branch')"
@@ -131,6 +131,8 @@ generate_takeover_plan() {
   risks_count="$(echo "$json_data" | jq -r '.risks | length')"
   blockers_count="$(echo "$json_data" | jq -r '.blocked_by | length')"
   resume_commands_json="$(echo "$json_data" | jq -r '.resume_commands // []')"
+  # blocked_by の上位3件を抽出（v2 は文字列配列、v3 はオブジェクト配列の両対応）
+  blockers_json="$(echo "$json_data" | jq '.blocked_by[0:3] // []')"
 
   # 重み付けスコアリング
   local verification_score state_score blockers_score risks_score total_score category
@@ -221,6 +223,7 @@ generate_takeover_plan() {
     --arg category "$category" \
     --argjson priority_actions "$priority_actions" \
     --argjson resume_commands "$resume_commands_json" \
+    --argjson blockers "$blockers_json" \
     '{
       workspace: $workspace,
       branch: $branch,
@@ -229,6 +232,7 @@ generate_takeover_plan() {
       decisions_count: $decisions_count,
       risks_count: $risks_count,
       blockers_count: $blockers_count,
+      blockers: $blockers,
       score: $score,
       category: $category,
       priority_actions: $priority_actions,

@@ -1,0 +1,11 @@
+# Local maw workspace data
+.maw/claims.json
+.maw/handovers/
+.maw/state.json
+.maw/.lockfile-hash
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Handover documents
+HANDOVER.md

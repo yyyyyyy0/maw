@@ -77,6 +77,7 @@ maw merge feature-auth
 | [設定リファレンス（日本語）](docs/ja/config.md) | config.json・設定ファイルの詳細 |
 | [設計思想（日本語）](docs/ja/concepts.md) | WS / claim / handover の設計思想 |
 | [セキュリティ（日本語）](docs/ja/security.md) | 入力バリデーションとセキュリティ対策 |
+| [CI Integration (日本語)](docs/ja/doctor-ci.md) | CI パイプラインでの `maw doctor --json` の使用方法 |
 | [Quick Start (English)](docs/en/getting-started.md) | Installation and basic workflow |
 | [Command Reference (English)](docs/en/commands.md) | All commands with options |
 | [Configuration Reference (English)](docs/en/config.md) | config.json and settings |
