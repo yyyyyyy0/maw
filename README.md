@@ -9,7 +9,7 @@
 | 課題 | maw の解決策 |
 |---|---|
 | ファイル競合 | `maw claim` で編集前に排他宣言・競合を事前防止 |
-| コンテキスト断絶 | `maw handover` でセッション間の引き継ぎを自動生成 |
+| コンテキスト断絶 | `maw handover` で引き継ぎ bundle を生成、`maw takeover` でセッションを再開 |
 | ディスク消費 | `node_modules` 等を symlink で全 WS が共有 |
 | 管理が煩雑 | worktree のライフサイクルを統合管理 |
 
@@ -61,7 +61,8 @@ maw merge feature-auth
 | `maw status` | ワークスペース状況と claims を表示 |
 | `maw claim <path>` | ファイル/ディレクトリを排他宣言 |
 | `maw unclaim <path>` | 排他宣言を解除 |
-| `maw handover` | 引き継ぎドキュメントを生成 |
+| `maw handover` | 引き継ぎ bundle を生成（Markdown + JSON） |
+| `maw takeover [<name>]` | handover bundle を読んでセッション再開プロンプトを出力 |
 | `maw merge <name>` | ブランチをマージ |
 | `maw cleanup` | ワークスペースを削除 |
 | `maw doctor` | 環境の整合性チェック |
