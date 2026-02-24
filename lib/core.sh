@@ -320,3 +320,20 @@ normalize_claim_path() {
 
   echo "$result"
 }
+
+# ワークスペース削除ヘルパー
+cleanup_workspace() {
+  local root="$1"
+  local name="$2"
+
+  local ws_path="${root}/${MAW_WORKSPACES_DIR}/${name}"
+
+  # worktree 削除
+  if [[ -d "$ws_path" ]]; then
+    (cd "$root" && git worktree remove "$ws_path" 2>/dev/null) || \
+      rm -rf "$ws_path"
+  fi
+
+  # state から削除
+  remove_workspace_state "$root" "$name"
+}

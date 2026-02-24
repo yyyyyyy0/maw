@@ -9,20 +9,20 @@ cmd_takeover() {
     case "$1" in
       --format)
         if [[ -z "${2:-}" ]]; then
-          log_error "--format には値が必要です (md|json|prompt)"
+          log_error "--format には値が必要です (md|json|prompt|plan)"
           exit 1
         fi
         format="$2"
         shift 2
         ;;
       -h|--help)
-        echo "Usage: maw takeover [<name>] [--format md|json|prompt]"
+        echo "Usage: maw takeover [<name>] [--format md|json|prompt|plan]"
         echo ""
         echo "handover bundle を読んでセッション再開プロンプトを出力します。"
         echo ""
         echo "Options:"
         echo "  <name>              ワークスペース名 (省略時は自動検出)"
-        echo "  --format <format>   出力形式: prompt (デフォルト), md, json"
+        echo "  --format <format>   出力形式: prompt (デフォルト), md, json, plan"
         return 0
         ;;
       -*)
@@ -43,9 +43,9 @@ cmd_takeover() {
 
   # format のバリデーション
   case "$format" in
-    md|json|prompt) ;;
+    md|json|prompt|plan) ;;
     *)
-      log_error "不明な format: ${format} (md|json|prompt のいずれかを指定)"
+      log_error "不明な format: ${format} (md|json|prompt|plan のいずれかを指定)"
       exit 1
       ;;
   esac
@@ -86,9 +86,106 @@ cmd_takeover() {
     return 0
   fi
 
-  # format=prompt の場合
+  # JSON データを読み取り
   local json_data
   json_data="$(cat "$json_file")"
+
+  # version チェックと v1→v2 互換性処理
+  local version
+  version="$(echo "$json_data" | jq -r '.version // 1')"
+
+  if [[ "$version" == "1" ]]; then
+    # v1 は新規フィールドを補完
+    json_data="$(echo "$json_data" | jq '
+      .decisions = [] |
+      .risks = [] |
+      .blocked_by = [] |
+      .resume_commands = [] |
+      .verification_status = "pending"
+    ')"
+  fi
+
+  # format=plan の場合は構造化プランを出力
+  if [[ "$format" == "plan" ]]; then
+    generate_takeover_plan "$json_data"
+    return 0
+  fi
+
+  # format=prompt の場合（agent 自動判定付き）
+  generate_prompt "$json_data" "$name"
+}
+
+# takeover plan 出力（JSON形式）
+generate_takeover_plan() {
+  local json_data="$1"
+
+  local workspace branch verification_status
+  local decisions_count risks_count blockers_count
+  local resume_commands_json
+
+  workspace="$(echo "$json_data" | jq -r '.workspace')"
+  branch="$(echo "$json_data" | jq -r '.branch')"
+  verification_status="$(echo "$json_data" | jq -r '.verification_status // "pending"')"
+  decisions_count="$(echo "$json_data" | jq -r '.decisions | length')"
+  risks_count="$(echo "$json_data" | jq -r '.risks | length')"
+  blockers_count="$(echo "$json_data" | jq -r '.blocked_by | length')"
+  resume_commands_json="$(echo "$json_data" | jq -r '.resume_commands // []')"
+
+  # priority_actions 生成
+  local priority_actions
+  priority_actions="$(jq -n '[]')"
+
+  if [[ "$verification_status" == "pending" ]]; then
+    priority_actions="$(echo "$priority_actions" | jq '. += [{"action": "verify", "description": "テストを実行してください"}]')"
+  fi
+
+  if [[ "$blockers_count" -eq 0 ]]; then
+    priority_actions="$(echo "$priority_actions" | jq '. += [{"action": "unblock", "description": "ブロッカーなし - 開始可能"}]')"
+  else
+    priority_actions="$(echo "$priority_actions" | jq '. += [{"action": "unblock", "description": "ブロッカーを解決してください"}]')"
+  fi
+
+  # 出力
+  jq -n \
+    --arg workspace "$workspace" \
+    --arg branch "$branch" \
+    --arg verification_status "$verification_status" \
+    --argjson decisions_count "$decisions_count" \
+    --argjson risks_count "$risks_count" \
+    --argjson blockers_count "$blockers_count" \
+    --argjson priority_actions "$priority_actions" \
+    --argjson resume_commands "$resume_commands_json" \
+    '{
+      workspace: $workspace,
+      branch: $branch,
+      verification_status: $verification_status,
+      decisions_count: $decisions_count,
+      risks_count: $risks_count,
+      blockers_count: $blockers_count,
+      priority_actions: $priority_actions,
+      resume_commands: $resume_commands
+    }'
+}
+
+# agent タイプに応じたプロンプト生成
+generate_prompt() {
+  local json_data="$1"
+  local name="$2"
+
+  local agent
+  agent="$(echo "$json_data" | jq -r '.agent // "generic"')"
+
+  case "$agent" in
+    claude) generate_claude_prompt "$json_data" "$name" ;;
+    codex) generate_codex_prompt "$json_data" "$name" ;;
+    *) generate_generic_prompt "$json_data" "$name" ;;
+  esac
+}
+
+# Claude Code 向けプロンプト
+generate_claude_prompt() {
+  local json_data="$1"
+  local name="$2"
 
   local branch base_branch state generated_at
   branch="$(echo "$json_data" | jq -r '.branch')"
@@ -153,4 +250,36 @@ cmd_takeover() {
   else
     echo "(none recorded)"
   fi
+}
+
+# Codex 向けプロンプト
+generate_codex_prompt() {
+  local json_data="$1"
+  local name="$2"
+
+  local branch base_branch
+  branch="$(echo "$json_data" | jq -r '.branch')"
+  base_branch="$(echo "$json_data" | jq -r '.base_branch')"
+
+  echo "Resuming workspace: ${name}"
+  echo "Branch: ${branch} (base: ${base_branch})"
+  echo ""
+  echo "Please continue the work from where we left off."
+}
+
+# 汎用プロンプト
+generate_generic_prompt() {
+  local json_data="$1"
+  local name="$2"
+
+  local branch base_branch
+  branch="$(echo "$json_data" | jq -r '.branch')"
+  base_branch="$(echo "$json_data" | jq -r '.base_branch')"
+
+  echo "# Resume: ${name}"
+  echo ""
+  echo "Branch: ${branch}"
+  echo "Base branch: ${base_branch}"
+  echo ""
+  echo "Please review the handover documentation and continue the work."
 }

@@ -37,7 +37,8 @@ Commands:
   merge [name|options]    ブランチをマージ
   takeover [name]         handover bundle を読んでセッション再開プロンプトを出力
   cleanup [name|options]  ワークスペースを削除
-  doctor                  環境の整合性チェック
+  doctor [options]        環境の整合性チェック (--fix, --aggressive, --json)
+  migrate <file>          handover JSON を v1 から v2 に移行
 
 Options:
   -h, --help              ヘルプを表示
@@ -86,7 +87,7 @@ main() {
       echo "maw v${MAW_VERSION}"
       exit 0
       ;;
-    init|spawn|list|cleanup|doctor|status|claim|unclaim|handover|merge|takeover)
+    init|spawn|list|cleanup|doctor|status|claim|unclaim|handover|merge|takeover|migrate)
       check_dependencies
       local cmd="$1"
       shift

@@ -184,3 +184,53 @@ calculate_relative_path() {
   echo "$rel_path"
   return 0
 }
+
+# handover JSON フィールド検証
+validate_handover_field() {
+  local field="$1"
+  local value="$2"
+  local allowed="$3"
+
+  case "$allowed" in
+    *"$value"*) return 0 ;;
+    *) log_error "${field}: '${value}' は不正です (許容値: ${allowed})"; return 1 ;;
+  esac
+}
+
+# handover JSON 構造検証
+validate_handover_json() {
+  local json_file="$1"
+
+  # version チェック
+  local version
+  version="$(jq -r '.version // 1' "$json_file")"
+
+  # verification_status 検証 (v2以上)
+  if [[ "$version" -ge 2 ]]; then
+    local status
+    status="$(jq -r '.verification_status // "pending"' "$json_file")"
+    validate_handover_field "verification_status" "$status" "pending passed failed skipped" || return 1
+  fi
+
+  # risk severity 検証 (v2以上)
+  if [[ "$version" -ge 2 ]]; then
+    local severities
+    severities="$(jq -r '.risks[].severity // empty' "$json_file" 2>/dev/null)" || severities=""
+    while IFS= read -r severity; do
+      [[ -z "$severity" ]] && continue
+      validate_handover_field "risk severity" "$severity" "low medium high critical" || return 1
+    done <<< "$severities"
+  fi
+
+  # blocked_by type 検証 (v2以上)
+  if [[ "$version" -ge 2 ]]; then
+    local types
+    types="$(jq -r '.blocked_by[].type // empty' "$json_file" 2>/dev/null)" || types=""
+    while IFS= read -r type; do
+      [[ -z "$type" ]] && continue
+      validate_handover_field "blocker type" "$type" "dependency issue blocker" || return 1
+    done <<< "$types"
+  fi
+
+  return 0
+}

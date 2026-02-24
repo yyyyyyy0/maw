@@ -4,6 +4,7 @@
 cmd_handover() {
   local workspace=""
   local scope="full"
+  local validate_name=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -16,14 +17,19 @@ cmd_handover() {
         fi
         shift 2
         ;;
+      --validate)
+        validate_name="$2"
+        shift 2
+        ;;
       -h|--help)
-        echo "Usage: maw handover [--workspace <name>] [--scope full|summary|evidence]"
+        echo "Usage: maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <name>]"
         echo ""
-        echo "引き継ぎドキュメントを生成します。"
+        echo "引き継ぎドキュメントを生成または検証します。"
         echo ""
         echo "Options:"
         echo "  --workspace <name>  ワークスペース名 (省略時は自動検出)"
         echo "  --scope <mode>      出力スコープ (full|summary|evidence, デフォルト: full)"
+        echo "  --validate <name>   handover JSON を検証"
         return 0
         ;;
       -*)
@@ -36,6 +42,23 @@ cmd_handover() {
         ;;
     esac
   done
+
+  local root
+  root="$(require_maw_root)"
+
+  # --validate モード
+  if [[ -n "$validate_name" ]]; then
+    local json_file="${root}/${MAW_HANDOVERS_DIR}/ws-${validate_name}.json"
+    if [[ ! -f "$json_file" ]]; then
+      log_error "handover JSON が見つかりません: ${json_file}"
+      exit 1
+    fi
+    # shellcheck source=lib/validate.sh
+    source "${LIB_DIR}/validate.sh"
+    validate_handover_json "$json_file"
+    log_success "validation passed"
+    return 0
+  fi
 
   local root
   root="$(require_maw_root)"
@@ -237,10 +260,10 @@ cmd_handover() {
     claims_json="$(echo "$claims" | jq --arg ws "$workspace" \
       '[.claims | to_entries[] | select(.value.workspace == $ws)] | from_entries')"
 
-    # jq で JSON 生成
+    # jq で JSON 生成 (version 2)
     local json
     json="$(jq -n \
-      --argjson version 1 \
+      --argjson version 2 \
       --arg workspace "$workspace" \
       --arg branch "$branch" \
       --arg base_branch "$base_branch" \
@@ -251,6 +274,11 @@ cmd_handover() {
       --argjson log "$log_json" \
       --argjson claims "$claims_json" \
       --arg state "$ws_state" \
+      --argjson decisions "[]" \
+      --argjson risks "[]" \
+      --argjson blocked_by "[]" \
+      --argjson resume_commands "[]" \
+      --arg verification_status "pending" \
       --arg generated_at "$now" \
       '{
         version: $version,
@@ -265,6 +293,11 @@ cmd_handover() {
         claims: $claims,
         state: $state,
         next_steps: [],
+        decisions: $decisions,
+        risks: $risks,
+        blocked_by: $blocked_by,
+        resume_commands: $resume_commands,
+        verification_status: $verification_status,
         generated_at: $generated_at
       }')"
 

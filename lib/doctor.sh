@@ -6,15 +6,21 @@ source "${LIB_DIR}/validate.sh"
 
 cmd_doctor() {
   local fix=false
+  local aggressive=false
+  local json_output=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --fix) fix=true; shift ;;
+      --aggressive) aggressive=true; shift ;;
+      --json) json_output=true; shift ;;
       -h|--help)
-        echo "Usage: maw doctor [--fix]"
+        echo "Usage: maw doctor [--fix] [--aggressive] [--json]"
         echo ""
         echo "Options:"
-        echo "  --fix    検出された問題を自動修復"
+        echo "  --fix         検出された問題を自動修復"
+        echo "  --aggressive マージ済みブランチや dangling worktree を削除"
+        echo "  --json        JSON 形式で出力"
         return 0
         ;;
       *)
@@ -26,6 +32,18 @@ cmd_doctor() {
 
   local root
   root="$(require_maw_root)"
+
+  # --json モード
+  if [[ "$json_output" == true ]]; then
+    cmd_doctor_json_output "$root"
+    return 0
+  fi
+
+  # --aggressive モード（確認プロンプト付き）
+  if [[ "$aggressive" == true ]]; then
+    cmd_doctor_aggressive_checks "$root" "$fix"
+    return 0
+  fi
 
   local issues=0
   local fixed=0
@@ -243,6 +261,166 @@ cmd_doctor() {
       log_info "検出: ${issues} 件 / 修復: ${fixed} 件"
     else
       log_warn "問題: ${issues} 件 — 'maw doctor --fix' で修復できます"
+    fi
+  fi
+}
+
+# JSON 出力モード
+cmd_doctor_json_output() {
+  local root="$1"
+
+  local total_checks=0 passed=0 failed=0 warnings=0 fixable=0
+  local checks_json="[]"
+
+  # チェック関数（共通ロジックを抽出）
+  run_check() {
+    local name="$1"
+    local status="$2"  # passed|failed|warning
+    local message="$3"
+    local fixable_bool="$4"
+
+    ((total_checks++)) || true
+    case "$status" in
+      passed) ((passed++)) || true ;;
+      failed) ((failed++)) || true ;;
+      warning) ((warnings++)) || true ;;
+    esac
+    [[ "$fixable_bool" == "true" ]] && ((fixable++)) || true
+
+    local severity="none"
+    [[ "$status" == "failed" ]] && severity="error"
+    [[ "$status" == "warning" ]] && severity="warning"
+
+    checks_json="$(echo "$checks_json" | jq --arg name "$name" --arg status "$status" \
+      --arg severity "$severity" --arg message "$message" --argjson fixable "$fixable_bool" \
+      '. += [{name: $name, status: $status, severity: $severity, message: $message, fixable: $fixable}]')"
+  }
+
+  local state
+  state="$(read_state "$root")"
+
+  # 1. Worktree 整合性チェック
+  while IFS= read -r name; do
+    local ws_path="${root}/${MAW_WORKSPACES_DIR}/${name}"
+    if [[ ! -d "$ws_path" ]]; then
+      run_check "worktree_integrity" "failed" "orphaned state: '${name}'" true
+    fi
+  done < <(echo "$state" | jq -r '.workspaces | keys[]' 2>/dev/null)
+
+  # まだ成功していれば成功として記録
+  if [[ "$passed" -eq 0 && "$failed" -eq 0 && "$warnings" -eq 0 ]]; then
+    run_check "worktree_integrity" "passed" "All worktrees match state.json" false
+  fi
+
+  # 出力
+  local now
+  now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  jq -n \
+    --argjson version 1 \
+    --arg timestamp "$now" \
+    --argjson total_checks "$total_checks" \
+    --argjson passed "$passed" \
+    --argjson failed "$failed" \
+    --argjson warnings "$warnings" \
+    --argjson fixable "$fixable" \
+    --argjson checks "$checks_json" \
+    '{
+      version: $version,
+      timestamp: $timestamp,
+      summary: {
+        total_checks: $total_checks,
+        passed: $passed,
+        failed: $failed,
+        warnings: $warnings,
+        fixable: $fixable
+      },
+      checks: $checks
+    }'
+}
+
+# Aggressive モード
+cmd_doctor_aggressive_checks() {
+  local root="$1"
+  local fix="$2"
+
+  log_warn "--aggressive モードはブランチとワークスペースを削除します"
+  echo ""
+
+  local confirm="no"
+  if [[ "$fix" == true ]]; then
+    read -rp "続行するには 'yes' と入力してください: " confirm
+    if [[ "$confirm" != "yes" ]]; then
+      log_info "キャンセルしました"
+      return 0
+    fi
+  fi
+
+  local issues=0
+  local fixed=0
+
+  # 1. マージ済みブランチの worktree 削除
+  echo "=== マージ済みブランチのチェック ==="
+  local state
+  state="$(read_state "$root")"
+  local base_branch
+  base_branch="$(cd "$root" && current_branch)"
+
+  while IFS= read -r name; do
+    local ws_info
+    ws_info="$(echo "$state" | jq -r --arg name "$name" '.workspaces[$name]')"
+    local branch
+    branch="$(echo "$ws_info" | jq -r '.branch')"
+
+    if is_branch_merged "$branch" "$base_branch"; then
+      log_warn "マージ済みブランチ: ${name} (${branch})"
+      ((issues++)) || true
+      if [[ "$fix" == true && "$confirm" == "yes" ]]; then
+        cleanup_workspace "$root" "$name"
+        remove_workspace_state "$root" "$name"
+        log_success "  -> ワークスペースを削除しました: ${name}"
+        ((fixed++)) || true
+      fi
+    fi
+  done < <(echo "$state" | jq -r '.workspaces | keys[]' 2>/dev/null)
+
+  # 2. git worktree prune
+  echo ""
+  echo "=== Git Worktree Prune ==="
+  (cd "$root" && git worktree prune)
+  log_success "prune 実行しました"
+
+  # 3. 空 handover ファイル削除
+  echo ""
+  echo "=== 空 Handover ファイル ==="
+  local handover_dir="${root}/${MAW_HANDOVERS_DIR}"
+  if [[ -d "$handover_dir" ]]; then
+    while IFS= read -r file; do
+      [[ -z "$file" ]] && continue
+      local size
+      size="$(wc -c < "$file" 2>/dev/null)" || size="0"
+      if [[ "$size" -eq 0 ]]; then
+        log_warn "空 handover ファイル: $(basename "$file")"
+        ((issues++)) || true
+        if [[ "$fix" == true && "$confirm" == "yes" ]]; then
+          rm -f "$file"
+          log_success "  -> 削除しました"
+          ((fixed++)) || true
+        fi
+      fi
+    done < <(find "$handover_dir" -name "*.json" -o -name "*.md" 2>/dev/null)
+  fi
+
+  # サマリー
+  echo ""
+  echo "=== サマリー ==="
+  if [[ "$issues" -eq 0 ]]; then
+    log_success "クリーンです"
+  else
+    if [[ "$fix" == true ]]; then
+      log_info "検出: ${issues} 件 / 削除: ${fixed} 件"
+    else
+      log_warn "問題: ${issues} 件 — 'maw doctor --fix --aggressive' で削除できます"
     fi
   fi
 }
