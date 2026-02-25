@@ -1474,3 +1474,93 @@ teardown() {
   [ "$first" = "Simple string blocker" ]
   [ "$second" = "Complex object blocker" ]
 }
+
+@test "maw takeover --format plan は description なしのオブジェクト blocker をフォールバック表示する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  # Create object without description
+  local json_file=".maw/handovers/ws-ws1.json"
+  local updated
+  updated="$(jq '
+    .version = 3 |
+    .blocked_by = [
+      {type: "dependency", resolved: false}
+    ]
+  ' "$json_file")"
+  echo "$updated" > "$json_file"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local blocker
+  blocker="$(echo "$output" | jq -r '.blockers[0]')"
+  [ "$blocker" = "[invalid blocker object]" ]
+}
+
+@test "maw takeover --format plan は無効なタイプ（null）の blocker をフォールバック表示する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  # Create null entry
+  local json_file=".maw/handovers/ws-ws1.json"
+  local updated
+  updated="$(jq '
+    .version = 3 |
+    .blocked_by = [null]
+  ' "$json_file")"
+  echo "$updated" > "$json_file"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local blocker
+  blocker="$(echo "$output" | jq -r '.blockers[0]')"
+  [ "$blocker" = "[invalid blocker entry]" ]
+}
+
+@test "maw takeover --format plan は無効なタイプ（number）の blocker をフォールバック表示する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  # Create number entry
+  local json_file=".maw/handovers/ws-ws1.json"
+  local updated
+  updated="$(jq '
+    .version = 3 |
+    .blocked_by = [42]
+  ' "$json_file")"
+  echo "$updated" > "$json_file"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local blocker
+  blocker="$(echo "$output" | jq -r '.blockers[0]')"
+  [ "$blocker" = "[invalid blocker entry]" ]
+}
+
+@test "maw takeover --format plan は無効なタイプ（bool）の blocker をフォールバック表示する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  # Create bool entry
+  local json_file=".maw/handovers/ws-ws1.json"
+  local updated
+  updated="$(jq '
+    .version = 3 |
+    .blocked_by = [true]
+  ' "$json_file")"
+  echo "$updated" > "$json_file"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local blocker
+  blocker="$(echo "$output" | jq -r '.blockers[0]')"
+  [ "$blocker" = "[invalid blocker entry]" ]
+}

@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.2] - 2026-02-25
+
+### Added
+- **blocked_by v3 オブジェクトスキーマ read 対応**: `takeover` コマンドで v3 ドラフトスキーマのオブジェクト形式 `blocked_by` を読み取り対応
+  - オブジェクト形式の `description` フィールドを表示
+  - v2 文字列配列との後方互換性を維持
+  - 混合配列（文字列+オブジェクト）に対応
+  - 不正なエントリに対するフォールバック表示を実装
+
+### Changed
+- `lib/takeover.sh`: blocked_by 正規化ロジックを強化（v3 オブジェクト対応、異常系フォールバック）
+- `tests/maw_test.bats`: v3 オブジェクト形式、混合配列、異常系のテストを追加
+
+### Fixed
+- description フィールドを持たない blocker オブジェクトが `[invalid blocker object]` と表示されるように修正
+- 文字列/オブジェクト以外のタイプ（null/number/bool）が `[invalid blocker entry]` と表示されるように修正
+
 ## [0.6.1] - 2026-02-25
 
 ### Added

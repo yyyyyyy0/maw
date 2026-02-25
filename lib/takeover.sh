@@ -134,7 +134,12 @@ generate_takeover_plan() {
   # v2(v3) の blocked_by を正規化（stringはそのまま、objectはdescriptionを抽出）
   blockers_json="$(echo "$json_data" | jq '
     .blocked_by[0:3] // [] |
-    map(if type == "string" then . else .description // "Blocker without description" end)
+    map(
+      if type == "string" then .
+      elif type == "object" then (.description // "[invalid blocker object]")
+      else "[invalid blocker entry]"
+      end
+    )
   ')"
 
   # 重み付けスコアリング
