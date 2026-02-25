@@ -28,6 +28,7 @@ jobs:
 
       - name: Test init -> spawn -> handover -> takeover flow
         run: |
+          MAW_BIN="$GITHUB_WORKSPACE/bin/maw"
           cd /tmp && TEST_DIR=$(mktemp -d) && cd "$TEST_DIR"
           git init --initial-branch=main
           git config user.email "test@example.com"
@@ -35,18 +36,19 @@ jobs:
           echo '{}' > package.json && echo '# test' > yarn.lock
           git add . && git commit -m "initial"
 
-          bin/maw init
-          bin/maw spawn test_ws --agent claude --issue 1
-          bin/maw handover test_ws
-          bin/maw takeover test_ws --format plan | jq '.workspace'
+          "$MAW_BIN" init
+          "$MAW_BIN" spawn test_ws --agent claude --issue 1
+          "$MAW_BIN" handover --workspace test_ws
+          "$MAW_BIN" takeover test_ws --format plan | jq '.workspace'
 
       - name: Test doctor JSON
         run: |
+          MAW_BIN="$GITHUB_WORKSPACE/bin/maw"
           cd /tmp && TEST_DIR=$(mktemp -d) && cd "$TEST_DIR"
           git init --initial-branch=main
           git config user.email "test@example.com"
           git config user.name "Test User"
           echo '{}' > package.json && git add . && git commit -m "init"
 
-          bin/maw init
-          bin/maw doctor --json | jq '.version'
+          "$MAW_BIN" init
+          "$MAW_BIN" doctor --json | jq '.version'
