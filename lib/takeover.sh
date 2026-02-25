@@ -131,8 +131,11 @@ generate_takeover_plan() {
   risks_count="$(echo "$json_data" | jq -r '.risks | length')"
   blockers_count="$(echo "$json_data" | jq -r '.blocked_by | length')"
   resume_commands_json="$(echo "$json_data" | jq -r '.resume_commands // []')"
-  # blocked_by の上位3件を抽出（v2 は文字列配列、v3 はオブジェクト配列の両対応）
-  blockers_json="$(echo "$json_data" | jq '.blocked_by[0:3] // []')"
+  # v2(v3) の blocked_by を正規化（stringはそのまま、objectはdescriptionを抽出）
+  blockers_json="$(echo "$json_data" | jq '
+    .blocked_by[0:3] // [] |
+    map(if type == "string" then . else .description // "Blocker without description" end)
+  ')"
 
   # 重み付けスコアリング
   local verification_score state_score blockers_score risks_score total_score category

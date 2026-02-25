@@ -1389,3 +1389,88 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" =~ "不正な --exit-code-mode 値" ]]
 }
+
+@test "maw takeover --format plan は v2 文字列配列の blocked_by を正しく表示する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker 1"
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker 2"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  # Verify blockers are displayed as strings (backward compatibility)
+  local blockers_count
+  blockers_count="$(echo "$output" | jq -r '.blockers_count')"
+  [ "$blockers_count" -eq 2 ]
+
+  local first
+  first="$(echo "$output" | jq -r '.blockers[0]')"
+  [ "$first" = "Blocker 1" ]
+}
+
+@test "maw takeover --format plan は v3 オブジェクト配列の blocked_by を正しく表示する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  # Manually create v3 handover with object blockers
+  local json_file=".maw/handovers/ws-ws1.json"
+  local updated
+  updated="$(jq '
+    .version = 3 |
+    .blocked_by = [
+      {type: "dependency", description: "Waiting for lib-v2", resolved: false},
+      {type: "issue", description: "Design approval needed", resolved: true, resolved_at: "2025-02-25T12:00:00Z"}
+    ]
+  ' "$json_file")"
+  echo "$updated" > "$json_file"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  # Verify descriptions are extracted
+  local blockers_count
+  blockers_count="$(echo "$output" | jq -r '.blockers_count')"
+  [ "$blockers_count" -eq 2 ]
+
+  # Verify descriptions (not full objects)
+  local first second
+  first="$(echo "$output" | jq -r '.blockers[0]')"
+  second="$(echo "$output" | jq -r '.blockers[1]')"
+  [ "$first" = "Waiting for lib-v2" ]
+  [ "$second" = "Design approval needed" ]
+}
+
+@test "maw takeover --format plan は混合配列 (文字列+オブジェクト) を正しく表示する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  # Create mixed format
+  local json_file=".maw/handovers/ws-ws1.json"
+  local updated
+  updated="$(jq '
+    .version = 3 |
+    .blocked_by = [
+      "Simple string blocker",
+      {type: "dependency", description: "Complex object blocker", resolved: false}
+    ]
+  ' "$json_file")"
+  echo "$updated" > "$json_file"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  # Both should be displayed as strings
+  local blockers_count
+  blockers_count="$(echo "$output" | jq -r '.blockers_count')"
+  [ "$blockers_count" -eq 2 ]
+
+  local first second
+  first="$(echo "$output" | jq -r '.blockers[0]')"
+  second="$(echo "$output" | jq -r '.blockers[1]')"
+  [ "$first" = "Simple string blocker" ]
+  [ "$second" = "Complex object blocker" ]
+}

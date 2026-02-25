@@ -125,10 +125,10 @@ validate_blocked_by_v3() {
 - [x] v3 schema 仕様書の作成
 - [x] 移行方針の策定
 
-### Phase P3-2（将来）
-- [ ] validate.sh の更新（文字列とオブジェクトの両方を許容）
-- [ ] takeover.sh でのオブジェクト形式の表示対応
-- [ ] handover.sh の `--blocked-by` オプションでオブジェクト形式をサポート
+### Phase P3-2（v0.7.2 で一部実装済み）
+- [x] takeover.sh でのオブジェクト形式の表示対応（v2/v3混合対応、readのみ）
+- [ ] validate.sh の更新（v0.7.3 で予定）
+- [ ] handover.sh の `--blocked-by` オプションでオブジェクト形式をサポート（v0.7.3 で予定）
 
 ## 付録: 完全な v3 JSON 例
 
