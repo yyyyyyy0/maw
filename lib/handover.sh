@@ -13,8 +13,13 @@ cmd_handover() {
   local resume_command=""
   local verification_status=""
   local blocked_by=""
+  local blocked_by_type=""
+  local blocked_by_desc=""
+  local blocked_by_owner=""
   local unblock=""
   local clear_blockers=false
+  local summary=""
+  local evidence_refs_raw=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -79,6 +84,40 @@ cmd_handover() {
         blocked_by="$2"
         shift 2
         ;;
+      --blocked-by-type)
+        if [[ -z "${2:-}" ]]; then
+          log_error "--blocked-by-type には値が必要です (dependency|issue|blocker)"
+          exit 1
+        fi
+        edit_mode=true
+        blocked_by_type="$2"
+        case "$blocked_by_type" in
+          dependency|issue|blocker) ;;
+          *)
+            log_error "不正な --blocked-by-type 値: ${blocked_by_type} (dependency|issue|blocker)"
+            exit 1
+            ;;
+        esac
+        shift 2
+        ;;
+      --blocked-by-desc)
+        if [[ -z "${2:-}" ]]; then
+          log_error "--blocked-by-desc の値が空です"
+          exit 1
+        fi
+        edit_mode=true
+        blocked_by_desc="$2"
+        shift 2
+        ;;
+      --blocked-by-owner)
+        if [[ -z "${2:-}" ]]; then
+          log_error "--blocked-by-owner には値が必要です"
+          exit 1
+        fi
+        edit_mode=true
+        blocked_by_owner="$2"
+        shift 2
+        ;;
       --unblock)
         edit_mode=true
         unblock="$2"
@@ -88,6 +127,28 @@ cmd_handover() {
         edit_mode=true
         clear_blockers=true
         shift
+        ;;
+      --summary)
+        if [[ -z "${2:-}" ]]; then
+          log_error "--summary には値が必要です"
+          exit 1
+        fi
+        edit_mode=true
+        summary="$2"
+        shift 2
+        ;;
+      --evidence-ref)
+        if [[ -z "${2:-}" ]]; then
+          log_error "--evidence-ref には値が必要です"
+          exit 1
+        fi
+        edit_mode=true
+        if [[ -z "$evidence_refs_raw" ]]; then
+          evidence_refs_raw="$2"
+        else
+          evidence_refs_raw="${evidence_refs_raw}"$'\n'"$2"
+        fi
+        shift 2
         ;;
       -h|--help)
         echo "Usage: maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <name>] [edit options]"
@@ -106,9 +167,14 @@ cmd_handover() {
         echo "  --risk-severity <level>    リスク重要度 (low|medium|high|critical, デフォルト: medium)"
         echo "  --resume-command <cmd>     resume_commands 配列に追加"
         echo "  --verification-status <s>  verification_status を更新 (pending|passed|failed|skipped)"
-        echo "  --blocked-by <text>        blocked_by 配列に追加"
+        echo "  --blocked-by <text>        blocked_by 配列に文字列として追加（後方互換）"
+        echo "  --blocked-by-type <type>   v3 object 形式: type (dependency|issue|blocker)"
+        echo "  --blocked-by-desc <text>   v3 object 形式: description（--blocked-by-type と一緒に使用）"
+        echo "  --blocked-by-owner <name>  v3 object 形式: owner（省略可）"
         echo "  --unblock <text>           blocked_by 配列から要素を削除（部分一致）"
         echo "  --clear-blockers           blocked_by 配列を空にする"
+        echo "  --summary <text>           summary フィールドを設定（1-3文の要約）"
+        echo "  --evidence-ref <ref>       evidence_refs 配列に参照を追加（複数指定可、例: diff:HEAD~1）"
         return 0
         ;;
       -*)
@@ -134,19 +200,16 @@ cmd_handover() {
     fi
     # shellcheck source=lib/validate.sh
     source "${LIB_DIR}/validate.sh"
-    validate_handover_json "$json_file"
+    validate_handover_bundle "$json_file"
     log_success "validation passed"
     return 0
   fi
 
   # --edit モード（handover JSON を更新）
   if [[ "$edit_mode" == true ]]; then
-    cmd_handover_edit "$root" "$workspace" "$next_step" "$decision" "$risk" "$risk_severity" "$resume_command" "$verification_status" "$blocked_by" "$unblock" "$clear_blockers"
+    cmd_handover_edit "$root" "$workspace" "$next_step" "$decision" "$risk" "$risk_severity" "$resume_command" "$verification_status" "$blocked_by" "$unblock" "$clear_blockers" "$blocked_by_type" "$blocked_by_desc" "$blocked_by_owner" "$summary" "$evidence_refs_raw"
     return $?
   fi
-
-  local root
-  root="$(require_maw_root)"
 
   # ワークスペース検出
   if [[ -z "$workspace" ]]; then
@@ -312,6 +375,17 @@ cmd_handover() {
 
   # --- JSON サイドカー生成 (evidence スコープ以外) ---
   if [[ "$scope" != "evidence" ]]; then
+    # id 生成（workspace + generated_at のハッシュ先頭16文字）
+    local id
+    local id_src="${workspace}:${now}"
+    if command -v sha256sum &>/dev/null; then
+      id="$(echo -n "$id_src" | sha256sum | cut -c1-16)"
+    elif command -v md5sum &>/dev/null; then
+      id="$(echo -n "$id_src" | md5sum | cut -c1-16)"
+    else
+      id="$(echo -n "$id_src" | md5 -q | cut -c1-16)"
+    fi
+
     # state 判定
     local ws_state="clean"
     local porcelain=""
@@ -349,6 +423,7 @@ cmd_handover() {
     local json
     json="$(jq -n \
       --argjson version 2 \
+      --arg id "$id" \
       --arg workspace "$workspace" \
       --arg branch "$branch" \
       --arg base_branch "$base_branch" \
@@ -367,6 +442,7 @@ cmd_handover() {
       --arg generated_at "$now" \
       '{
         version: $version,
+        id: $id,
         workspace: $workspace,
         branch: $branch,
         base_branch: $base_branch,
@@ -383,7 +459,9 @@ cmd_handover() {
         blocked_by: $blocked_by,
         resume_commands: $resume_commands,
         verification_status: $verification_status,
-        generated_at: $generated_at
+        generated_at: $generated_at,
+        summary: "",
+        evidence_refs: []
       }')"
 
     echo "$json" > "$json_file"
@@ -404,6 +482,11 @@ cmd_handover_edit() {
   local blocked_by="$9"
   local unblock="${10}"
   local clear_blockers="${11}"
+  local blocked_by_type="${12}"
+  local blocked_by_desc="${13}"
+  local blocked_by_owner="${14}"
+  local summary="${15}"
+  local evidence_refs_raw="${16}"
 
   # ワークスペース検出
   if [[ -z "$workspace" ]]; then
@@ -470,10 +553,32 @@ cmd_handover_edit() {
     updated=true
   fi
 
-  # blocked_by に追加
+  # blocked_by に追加（文字列形式・後方互換）
   if [[ -n "$blocked_by" ]]; then
     json_data="$(echo "$json_data" | jq --arg desc "$blocked_by" '.blocked_by += [$desc]')"
     log_success "blocked_by を追加: ${blocked_by}"
+    updated=true
+  fi
+
+  # blocked_by に追加（v3 object 形式）
+  if [[ -n "$blocked_by_type" || -n "$blocked_by_desc" ]]; then
+    if [[ -z "$blocked_by_type" || -z "$blocked_by_desc" ]]; then
+      log_error "--blocked-by-type と --blocked-by-desc は両方指定してください"
+      exit 1
+    fi
+    if [[ -n "$blocked_by_owner" ]]; then
+      json_data="$(echo "$json_data" | jq \
+        --arg type "$blocked_by_type" \
+        --arg desc "$blocked_by_desc" \
+        --arg owner "$blocked_by_owner" \
+        '.blocked_by += [{"type": $type, "description": $desc, "resolved": false, "owner": $owner}]')"
+    else
+      json_data="$(echo "$json_data" | jq \
+        --arg type "$blocked_by_type" \
+        --arg desc "$blocked_by_desc" \
+        '.blocked_by += [{"type": $type, "description": $desc, "resolved": false}]')"
+    fi
+    log_success "blocked_by を追加 (object): ${blocked_by_type} - ${blocked_by_desc}"
     updated=true
   fi
 
@@ -508,6 +613,24 @@ cmd_handover_edit() {
     updated=true
   fi
 
+  # summary を設定
+  if [[ -n "$summary" ]]; then
+    json_data="$(echo "$json_data" | jq --arg s "$summary" '.summary = $s')"
+    log_success "summary を設定: ${summary}"
+    updated=true
+  fi
+
+  # evidence_refs に追加（複数対応）
+  if [[ -n "$evidence_refs_raw" ]]; then
+    json_data="$(echo "$json_data" | jq 'if .evidence_refs == null then .evidence_refs = [] else . end')"
+    while IFS= read -r ref; do
+      [[ -z "$ref" ]] && continue
+      json_data="$(echo "$json_data" | jq --arg ref "$ref" '.evidence_refs += [$ref]')"
+      log_success "evidence_ref を追加: ${ref}"
+    done <<< "$evidence_refs_raw"
+    updated=true
+  fi
+
   if [[ "$updated" == false ]]; then
     log_error "編集オプションが指定されていません。"
     exit 1
@@ -519,7 +642,7 @@ cmd_handover_edit() {
   local tmp_file
   tmp_file="$(mktemp)"
   echo "$json_data" > "$tmp_file"
-  validate_handover_json "$tmp_file"
+  validate_handover_bundle "$tmp_file"
 
   # アトミックに書き戻す
   mv "$tmp_file" "$json_file"

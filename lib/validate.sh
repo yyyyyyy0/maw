@@ -191,8 +191,8 @@ validate_handover_field() {
   local value="$2"
   local allowed="$3"
 
-  case "$allowed" in
-    *"$value"*) return 0 ;;
+  case " $allowed " in
+    *" $value "*) return 0 ;;
     *) log_error "${field}: '${value}' は不正です (許容値: ${allowed})"; return 1 ;;
   esac
 }
@@ -230,6 +230,66 @@ validate_handover_json() {
       [[ -z "$type" ]] && continue
       validate_handover_field "blocker type" "$type" "dependency issue blocker" || return 1
     done <<< "$types"
+  fi
+
+  return 0
+}
+
+# handover bundle 完全検証（v3 object 形式の詳細チェックを含む）
+validate_handover_bundle() {
+  local json_file="$1"
+
+  # 基本検証
+  validate_handover_json "$json_file" || return 1
+
+  # blocked_by オブジェクトエントリの完全検証
+  local version
+  version="$(jq -r '.version // 1' "$json_file")"
+
+  if [[ "$version" -ge 2 ]]; then
+    # オブジェクト形式のエントリは description が必須
+    local invalid_count
+    invalid_count="$(jq '[.blocked_by[] | select(type == "object" and (.description == null or .description == ""))] | length' "$json_file" 2>/dev/null)" || invalid_count=0
+    if [[ "$invalid_count" -gt 0 ]]; then
+      log_error "blocked_by オブジェクトに description が必要です（${invalid_count} 件が未設定）"
+      return 1
+    fi
+  fi
+
+  # id フィールドの型チェック（存在する場合は文字列であること）
+  local has_id
+  has_id="$(jq -r 'has("id")' "$json_file" 2>/dev/null)" || has_id="false"
+  if [[ "$has_id" == "true" ]]; then
+    local id_type
+    id_type="$(jq -r '.id | type' "$json_file" 2>/dev/null)" || id_type=""
+    if [[ "$id_type" != "string" ]]; then
+      log_error "id フィールドは文字列である必要があります"
+      return 1
+    fi
+  fi
+
+  # summary フィールドの型チェック（存在する場合は文字列であること、空文字 OK）
+  local has_summary
+  has_summary="$(jq -r 'has("summary")' "$json_file" 2>/dev/null)" || has_summary="false"
+  if [[ "$has_summary" == "true" ]]; then
+    local summary_type
+    summary_type="$(jq -r '.summary | type' "$json_file" 2>/dev/null)" || summary_type=""
+    if [[ "$summary_type" != "string" ]]; then
+      log_error "summary フィールドは文字列である必要があります"
+      return 1
+    fi
+  fi
+
+  # evidence_refs フィールドの型チェック（存在する場合は配列であること）
+  local has_evidence_refs
+  has_evidence_refs="$(jq -r 'has("evidence_refs")' "$json_file" 2>/dev/null)" || has_evidence_refs="false"
+  if [[ "$has_evidence_refs" == "true" ]]; then
+    local er_type
+    er_type="$(jq -r '.evidence_refs | type' "$json_file" 2>/dev/null)" || er_type=""
+    if [[ "$er_type" != "array" ]]; then
+      log_error "evidence_refs フィールドは配列である必要があります"
+      return 1
+    fi
   fi
 
   return 0

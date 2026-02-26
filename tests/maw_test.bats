@@ -49,6 +49,12 @@ teardown() {
   [[ "$output" =~ "Usage:" ]]
 }
 
+@test "maw migrate --help はヘルプを表示する" {
+  run "$MAW_BIN" migrate --help
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Usage: maw migrate" ]]
+}
+
 # ===== 不明なコマンド =====
 
 @test "不明なコマンドでエラーを返す" {
@@ -1324,6 +1330,21 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+@test "maw doctor --json は config.json 欠落時も JSON を返す" {
+  "$MAW_BIN" init
+  rm -f ".maw/config.json"
+
+  run "$MAW_BIN" doctor --json
+  [ "$status" -eq 0 ]
+
+  # エラー終了せず JSON として解釈可能
+  echo "$output" | jq . >/dev/null
+
+  local lockfile_msg
+  lockfile_msg="$(echo "$output" | jq -r '.checks[] | select(.name == "lockfile_hash") | .message')"
+  [ "$lockfile_msg" = "No package manager detected" ]
+}
+
 @test "maw doctor --json は問題検出時に 非0 で終了する" {
   "$MAW_BIN" init
   "$MAW_BIN" spawn ws1
@@ -1563,4 +1584,537 @@ teardown() {
   local blocker
   blocker="$(echo "$output" | jq -r '.blockers[0]')"
   [ "$blocker" = "[invalid blocker entry]" ]
+}
+
+# ===== v0.7.3: handover v3 object write =====
+
+@test "maw handover --blocked-by-type --blocked-by-desc で v3 object 形式で書き込まれる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 \
+    --blocked-by-type dependency \
+    --blocked-by-desc "PR #456 waiting"
+
+  local json_file=".maw/handovers/ws-ws1.json"
+  local blocker_type blocker_desc blocker_resolved
+  blocker_type="$(jq -r '.blocked_by[0].type' "$json_file")"
+  blocker_desc="$(jq -r '.blocked_by[0].description' "$json_file")"
+  blocker_resolved="$(jq -r '.blocked_by[0].resolved' "$json_file")"
+
+  [ "$blocker_type" = "dependency" ]
+  [ "$blocker_desc" = "PR #456 waiting" ]
+  [ "$blocker_resolved" = "false" ]
+}
+
+@test "maw handover --blocked-by-owner を指定するとオブジェクトに owner フィールドが含まれる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 \
+    --blocked-by-type blocker \
+    --blocked-by-desc "waiting for decision" \
+    --blocked-by-owner nil
+
+  local json_file=".maw/handovers/ws-ws1.json"
+  local owner
+  owner="$(jq -r '.blocked_by[0].owner' "$json_file")"
+  [ "$owner" = "nil" ]
+}
+
+@test "maw handover --blocked-by-type のみ指定するとエラー" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" handover --workspace ws1 --blocked-by-type dependency
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "--blocked-by-type と --blocked-by-desc は両方指定してください" ]]
+}
+
+@test "maw handover --blocked-by-type 不正値はエラー" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" handover --workspace ws1 --blocked-by-type invalid_type --blocked-by-desc "test"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "不正な --blocked-by-type 値" ]]
+}
+
+@test "v3 object write → takeover --format json roundtrip" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 \
+    --blocked-by-type dependency \
+    --blocked-by-desc "PR #456 waiting" \
+    --blocked-by-owner nil
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format json)"
+
+  local bl_type bl_desc bl_owner
+  bl_type="$(echo "$output" | jq -r '.blocked_by[0].type')"
+  bl_desc="$(echo "$output" | jq -r '.blocked_by[0].description')"
+  bl_owner="$(echo "$output" | jq -r '.blocked_by[0].owner')"
+
+  [ "$bl_type" = "dependency" ]
+  [ "$bl_desc" = "PR #456 waiting" ]
+  [ "$bl_owner" = "nil" ]
+}
+
+@test "v3 object write → takeover --format plan で blockers に description が表示される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 \
+    --blocked-by-type dependency \
+    --blocked-by-desc "外部PR #456 待ち"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local blockers_count first_blocker
+  blockers_count="$(echo "$output" | jq -r '.blockers_count')"
+  first_blocker="$(echo "$output" | jq -r '.blockers[0]')"
+
+  [ "$blockers_count" -eq 1 ]
+  [ "$first_blocker" = "外部PR #456 待ち" ]
+}
+
+@test "--unblock は object 形式 blocked_by の description に部分一致で削除する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 \
+    --blocked-by-type dependency \
+    --blocked-by-desc "PR #456 waiting for merge"
+  "$MAW_BIN" handover --workspace ws1 --unblock "PR #456"
+
+  local json_file=".maw/handovers/ws-ws1.json"
+  local count
+  count="$(jq '.blocked_by | length' "$json_file")"
+  [ "$count" -eq 0 ]
+}
+
+@test "validate_handover_bundle は description なしのオブジェクトを拒否する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  # description なしのオブジェクトを直接書き込む
+  local json_file=".maw/handovers/ws-ws1.json"
+  jq '.blocked_by = [{"type": "blocker", "resolved": false}]' "$json_file" > "${json_file}.tmp" \
+    && mv "${json_file}.tmp" "$json_file"
+
+  run "$MAW_BIN" handover --validate ws1
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "description" ]]
+}
+
+@test "validate_handover_bundle は不正な type を拒否する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  local json_file=".maw/handovers/ws-ws1.json"
+  jq '.blocked_by = [{"type": "invalid_type", "description": "test", "resolved": false}]' \
+    "$json_file" > "${json_file}.tmp" && mv "${json_file}.tmp" "$json_file"
+
+  run "$MAW_BIN" handover --validate ws1
+  [ "$status" -ne 0 ]
+}
+
+@test "maw migrate handover --to v3 --dry-run でプレビューが表示される（適用なし）" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "v2 string blocker"
+
+  local before_version
+  before_version="$(jq -r '.version' .maw/handovers/ws-ws1.json)"
+
+  run "$MAW_BIN" migrate handover --to v3 ws1 --dry-run
+  [ "$status" -eq 0 ]
+
+  # dry-run なのでファイルは変更されない
+  local after_version
+  after_version="$(jq -r '.version' .maw/handovers/ws-ws1.json)"
+  [ "$before_version" = "$after_version" ]
+}
+
+@test "maw migrate handover --to v3 --apply で v2→v3 変換が適用される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "v2 string blocker"
+
+  "$MAW_BIN" migrate handover --to v3 ws1 --apply
+
+  local json_file=".maw/handovers/ws-ws1.json"
+  local version bl_type bl_desc bl_resolved
+  version="$(jq -r '.version' "$json_file")"
+  bl_type="$(jq -r '.blocked_by[0].type' "$json_file")"
+  bl_desc="$(jq -r '.blocked_by[0].description' "$json_file")"
+  bl_resolved="$(jq -r '.blocked_by[0].resolved' "$json_file")"
+
+  [ "$version" = "3" ]
+  [ "$bl_type" = "blocker" ]
+  [ "$bl_desc" = "v2 string blocker" ]
+  [ "$bl_resolved" = "false" ]
+}
+
+@test "maw migrate handover --to v3 --apply 後も takeover --format plan が動作する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "v2 string blocker"
+  "$MAW_BIN" migrate handover --to v3 ws1 --apply
+
+  run "$MAW_BIN" takeover ws1 --format plan
+  [ "$status" -eq 0 ]
+
+  local blockers_count
+  blockers_count="$(echo "$output" | jq -r '.blockers_count')"
+  [ "$blockers_count" -eq 1 ]
+}
+
+@test "maw migrate handover --to v3 は既存の v3 ファイルをスキップする" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  # v3 に手動設定
+  local json_file=".maw/handovers/ws-ws1.json"
+  jq '.version = 3' "$json_file" > "${json_file}.tmp" && mv "${json_file}.tmp" "$json_file"
+
+  run "$MAW_BIN" migrate handover --to v3 ws1 --apply
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "migration not needed" ]]
+}
+
+# ===== v0.8.0: takeover priority_actions 強化 =====
+
+@test "takeover --format plan の priority_actions に priority_level フィールドがある" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  # priority_level が存在する
+  local has_level
+  has_level="$(echo "$output" | jq '[.priority_actions[] | has("priority_level")] | all')"
+  [ "$has_level" = "true" ]
+}
+
+@test "verification_status=failed で priority_level 1 の verify アクションが生成される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --verification-status failed
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local p1_action
+  p1_action="$(echo "$output" | jq -r '[.priority_actions[] | select(.priority_level == 1 and .action == "verify")] | first | .action')"
+  [ "$p1_action" = "verify" ]
+}
+
+@test "type=blocker の blocked_by は priority_level 1 のアクションを生成する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 \
+    --blocked-by-type blocker \
+    --blocked-by-desc "critical blocker"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local p1_unblock
+  p1_unblock="$(echo "$output" | jq -r '[.priority_actions[] | select(.priority_level == 1 and .action == "unblock")] | first | .blocker_type')"
+  [ "$p1_unblock" = "blocker" ]
+}
+
+@test "type=dependency の blocked_by は priority_level 2 のアクションを生成する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 \
+    --blocked-by-type dependency \
+    --blocked-by-desc "waiting for library update"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local p2_unblock
+  p2_unblock="$(echo "$output" | jq -r '[.priority_actions[] | select(.priority_level == 2 and .action == "unblock")] | first | .blocker_type')"
+  [ "$p2_unblock" = "dependency" ]
+}
+
+@test "type=issue の blocked_by は priority_level 2 のアクションを生成し description に Issue が含まれる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 \
+    --blocked-by-type issue \
+    --blocked-by-desc "design approval needed"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local p2_desc
+  p2_desc="$(echo "$output" | jq -r '[.priority_actions[] | select(.priority_level == 2 and .action == "unblock")] | first | .description')"
+  [[ "$p2_desc" =~ "Issue" ]]
+}
+
+@test "type=blocker は type=dependency より優先順位が高い（priority_level 1 < 2）" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 \
+    --blocked-by-type blocker \
+    --blocked-by-desc "critical blocker"
+  "$MAW_BIN" handover --workspace ws1 \
+    --blocked-by-type dependency \
+    --blocked-by-desc "dependency blocker"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local blocker_level dep_level
+  blocker_level="$(echo "$output" | jq -r '[.priority_actions[] | select(.blocker_type == "blocker")] | first | .priority_level')"
+  dep_level="$(echo "$output" | jq -r '[.priority_actions[] | select(.blocker_type == "dependency")] | first | .priority_level')"
+
+  [ "$blocker_level" -eq 1 ]
+  [ "$dep_level" -eq 2 ]
+}
+
+@test "v2 string blocked_by は priority_level 2 の unblock アクションにフォールバックする" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "v2 string blocker"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local p2_unblock_type
+  p2_unblock_type="$(echo "$output" | jq -r '[.priority_actions[] | select(.priority_level == 2 and .action == "unblock")] | first | .blocker_type')"
+  [ "$p2_unblock_type" = "unknown" ]
+}
+
+@test "takeover --format plan は同じ bundle で同じ plan を返す（idempotent）" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 \
+    --blocked-by-type dependency \
+    --blocked-by-desc "PR waiting" \
+    --verification-status failed
+
+  local output1 output2
+  output1="$("$MAW_BIN" takeover ws1 --format plan)"
+  output2="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  [ "$output1" = "$output2" ]
+}
+
+@test "--blocked-by-owner が指定された blocker は description に owner が含まれる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 \
+    --blocked-by-type blocker \
+    --blocked-by-desc "waiting for decision" \
+    --blocked-by-owner nil
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local action_desc
+  action_desc="$(echo "$output" | jq -r '[.priority_actions[] | select(.priority_level == 1 and .action == "unblock")] | first | .description')"
+  [[ "$action_desc" =~ "nil" ]]
+}
+
+@test "verify アクションに commands フィールドが含まれる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 \
+    --verification-status failed \
+    --resume-command "npm test"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local has_commands cmd_val
+  has_commands="$(echo "$output" | jq -r '[.priority_actions[] | select(.action == "verify")] | first | has("commands")')"
+  cmd_val="$(echo "$output" | jq -r '[.priority_actions[] | select(.action == "verify")] | first | .commands[0]')"
+
+  [ "$has_commands" = "true" ]
+  [ "$cmd_val" = "npm test" ]
+}
+
+@test "next_steps は priority_level 3 の next_step アクションとして追加される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --next-step "PR をレビューする"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local p3_action p3_desc
+  p3_action="$(echo "$output" | jq -r '[.priority_actions[] | select(.priority_level == 3 and .action == "next_step")] | first | .action')"
+  p3_desc="$(echo "$output" | jq -r '[.priority_actions[] | select(.priority_level == 3 and .action == "next_step")] | first | .description')"
+
+  [ "$p3_action" = "next_step" ]
+  [ "$p3_desc" = "PR をレビューする" ]
+}
+
+# ===== v0.9.0: Canonical State v0 =====
+
+@test "新規 handover JSON に id フィールドが含まれる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  local id
+  id="$(jq -r '.id' .maw/handovers/ws-ws1.json)"
+  [ "$id" != "null" ]
+  [ -n "$id" ]
+  [ "${#id}" -eq 16 ]
+}
+
+@test "新規 handover JSON に summary フィールドが空文字で含まれる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  local summary
+  summary="$(jq -r '.summary' .maw/handovers/ws-ws1.json)"
+  [ "$summary" = "" ]
+}
+
+@test "新規 handover JSON に evidence_refs フィールドが空配列で含まれる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  local er_type er_len
+  er_type="$(jq -r '.evidence_refs | type' .maw/handovers/ws-ws1.json)"
+  er_len="$(jq -r '.evidence_refs | length' .maw/handovers/ws-ws1.json)"
+  [ "$er_type" = "array" ]
+  [ "$er_len" -eq 0 ]
+}
+
+@test "maw handover --summary で summary が設定される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" handover --workspace ws1 --summary "認証モジュールのリファクタリング中。JWT移行完了、テスト待ち。"
+  [ "$status" -eq 0 ]
+
+  local summary
+  summary="$(jq -r '.summary' .maw/handovers/ws-ws1.json)"
+  [ "$summary" = "認証モジュールのリファクタリング中。JWT移行完了、テスト待ち。" ]
+}
+
+@test "maw handover --evidence-ref で evidence_refs 配列に追加される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" handover --workspace ws1 --evidence-ref "diff:HEAD~1"
+  [ "$status" -eq 0 ]
+
+  local ref len
+  ref="$(jq -r '.evidence_refs[0]' .maw/handovers/ws-ws1.json)"
+  len="$(jq '.evidence_refs | length' .maw/handovers/ws-ws1.json)"
+  [ "$ref" = "diff:HEAD~1" ]
+  [ "$len" -eq 1 ]
+}
+
+@test "maw handover --evidence-ref 複数指定で全て追加される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" handover --workspace ws1 --evidence-ref "diff:HEAD~1" --evidence-ref "test:npm test"
+  [ "$status" -eq 0 ]
+
+  local len first second
+  len="$(jq '.evidence_refs | length' .maw/handovers/ws-ws1.json)"
+  first="$(jq -r '.evidence_refs[0]' .maw/handovers/ws-ws1.json)"
+  second="$(jq -r '.evidence_refs[1]' .maw/handovers/ws-ws1.json)"
+  [ "$len" -eq 2 ]
+  [ "$first" = "diff:HEAD~1" ]
+  [ "$second" = "test:npm test" ]
+}
+
+@test "maw takeover --format plan の出力に id/summary/evidence_refs が含まれる" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --summary "テスト中" --evidence-ref "diff:HEAD~1"
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local id summary er_len
+  id="$(echo "$output" | jq -r '.id')"
+  summary="$(echo "$output" | jq -r '.summary')"
+  er_len="$(echo "$output" | jq '.evidence_refs | length')"
+
+  [ -n "$id" ]
+  [ "$id" != "null" ]
+  [ "$summary" = "テスト中" ]
+  [ "$er_len" -eq 1 ]
+}
+
+@test "maw takeover --format prompt の出力に Summary セクションが含まれる（summary 非空の場合）" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 --summary "認証モジュールのリファクタリング中"
+
+  run "$MAW_BIN" takeover ws1 --format prompt
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "## Summary" ]]
+  [[ "$output" =~ "認証モジュールのリファクタリング中" ]]
+}
+
+@test "maw takeover --format prompt で summary が空の場合は Summary セクションが出力されない" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  # summary は "" のまま
+
+  run "$MAW_BIN" takeover ws1 --format prompt
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "## Summary" ]]
+}
+
+@test "maw migrate handover --to v3 --apply 後に id/summary/evidence_refs が補完される" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  # v0.9.0 以前のファイルを模倣：id/summary/evidence_refs を削除
+  local json_file=".maw/handovers/ws-ws1.json"
+  jq 'del(.id) | del(.summary) | del(.evidence_refs)' "$json_file" > "${json_file}.tmp" \
+    && mv "${json_file}.tmp" "$json_file"
+
+  "$MAW_BIN" migrate handover --to v3 ws1 --apply
+
+  local id summary er_type
+  id="$(jq -r '.id' "$json_file")"
+  summary="$(jq -r '.summary' "$json_file")"
+  er_type="$(jq -r '.evidence_refs | type' "$json_file")"
+
+  [ "$id" != "null" ]
+  [ -n "$id" ]
+  [ "$summary" = "" ]
+  [ "$er_type" = "array" ]
 }

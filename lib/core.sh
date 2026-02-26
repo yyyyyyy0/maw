@@ -58,7 +58,12 @@ find_git_root() {
 read_config() {
   local root="$1"
   local key="$2"
-  jq -r "${key}" "${root}/${MAW_CONFIG_FILE}" 2>/dev/null
+  local config_path="${root}/${MAW_CONFIG_FILE}"
+
+  # config が未作成/欠落でも呼び出し側で安全に扱えるよう空文字を返す
+  [[ -f "$config_path" ]] || return 0
+
+  jq -r "${key}" "$config_path" 2>/dev/null || true
 }
 
 # config.json 全体を取得

@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.9.0] - 2026-02-26
+
+### Added
+- **Canonical State v0 最小スキーマ**: handover JSON に `id`/`summary`/`evidence_refs` フィールドを追加
+  - 新規生成時に `id`（`workspace:generated_at` の sha256/md5 ハッシュ先頭16文字）を自動付与
+  - 新規生成時に `summary: ""` および `evidence_refs: []` を初期化
+- **`--summary` オプション**: `maw handover --summary <text>` でハンドオーバーの要約を記録
+- **`--evidence-ref` オプション**: `maw handover --evidence-ref <ref>` で証拠参照を追加（複数指定可）
+  - 例: `--evidence-ref "diff:HEAD~1" --evidence-ref "test:npm test"`
+- **Takeover plan への反映**: `takeover --format plan` の出力に `id`/`summary`/`evidence_refs` を追加
+- **Takeover prompt への反映**: `takeover --format prompt`（Claude 向け）に `## Summary` セクションを追加（summary 非空の場合のみ）
+- **Migrate 補完**: `migrate handover --to v3 --apply` 実行時に `id`/`summary`/`evidence_refs` を自動補完
+- **Validate 強化**: `validate_handover_bundle` で `id`/`summary`/`evidence_refs` の型チェックを追加
+
+### Changed
+- `lib/handover.sh`: `--summary`/`--evidence-ref` オプション追加、新規 JSON 生成に `id`/`summary`/`evidence_refs` 追加
+- `lib/validate.sh`: `validate_handover_bundle` に新フィールドの型チェック追加（unknown fields は明示許容）
+- `lib/takeover.sh`: `generate_takeover_plan()` に `id`/`summary`/`evidence_refs` 出力追加、`generate_claude_prompt()` に Summary セクション追加
+- `lib/migrate.sh`: `migrate_handover_v2_to_v3()` で `--apply` 時に `id`/`summary`/`evidence_refs` を補完
+- `tests/maw_test.bats`: v0.9.0 の検証テストを追加（11件）
+- `bin/maw`: バージョン 0.9.0 に更新
+
+### Notes
+- schema `version` は 2 のまま（`id`/`summary`/`evidence_refs` は追加フィールドのみで後方互換）
+- version bump は後方互換が崩れるときのみ行う方針を維持
+- Phase 2（Canonical State と Evidence Refs の正式化）の入口が開いた
+
+## [0.8.0] - 2026-02-26
+
+### Added
+- **Takeover `priority_actions` 強化**: `takeover --format plan` の `priority_actions` を「状態表示」から「次に何をするか具体的に出す」へ格上げ
+  - `priority_level` フィールド（1/2/3）を全アクションに追加
+  - Priority 1: `verification_status=failed` → `verify` アクション（resume_commands 付き）
+  - Priority 1: `blocked_by` の `type=blocker` → owner テンプレート付き `unblock` アクション
+  - Priority 2: `verification_status=pending` → `verify` アクション
+  - Priority 2: `type=dependency` → 「依存先 PR/タスクの状況を確認」テンプレート
+  - Priority 2: `type=issue` → 「Issue を参照して解消方法を確認」テンプレート
+  - Priority 2: v2 文字列 `blocked_by` → `blocker_type: "unknown"` でフォールバック（後方互換）
+  - Priority 3: カテゴリベースアクション（start/review）と `next_steps`
+
+### Changed
+- `lib/takeover.sh`: `generate_takeover_plan()` の `priority_actions` 生成ロジックを全面刷新
+- `tests/maw_test.bats`: `priority_level`、blocked_by type 別テンプレート、idempotent の検証テストを追加（11件）
+- `bin/maw`: バージョン 0.8.0 に更新
+
+## [0.7.3] - 2026-02-26
+
+### Added
+- **Handover v3 object write**: `handover` コマンドで `blocked_by` を v3 オブジェクト形式で書き込み対応
+  - `--blocked-by-type <type>` オプション追加（dependency|issue|blocker）
+  - `--blocked-by-desc <text>` オプション追加（type と一緒に使用）
+  - `--blocked-by-owner <name>` オプション追加（省略可）
+  - `--blocked-by` は従来の文字列形式として後方互換維持
+- **Handover bundle 完全検証**: `validate_handover_bundle()` 関数追加
+  - `blocked_by` オブジェクトの `description` 必須チェック
+  - `--validate` モードで呼び出し（従来の `validate_handover_json` より厳格）
+- **Migrate v2→v3**: `maw migrate handover --to v3 <workspace>` コマンド追加
+  - v2 文字列 `blocked_by` → v3 オブジェクト形式に変換
+  - `--dry-run`（デフォルト）と `--apply` フラグ対応
+
+### Changed
+- `lib/handover.sh`: `--blocked-by-type/desc/owner` 引数追加、`validate_handover_bundle()` を使用するように変更
+- `lib/validate.sh`: `validate_handover_bundle()` 関数追加
+- `lib/migrate.sh`: サブコマンド形式（`maw migrate handover --to v3`）に対応、後方互換維持
+- `tests/maw_test.bats`: v0.7.3 のテスト追加（13件）
+
 ## [0.7.2] - 2026-02-25
 
 ### Added
