@@ -19,5 +19,8 @@ jobs:
           git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
           sudo /tmp/bats-core/install.sh /usr/local
 
-      - name: Run tests
+      - name: Run core bats tests
         run: bats tests/maw_test.bats
+
+      - name: Run security bats tests
+        run: bats tests/security_test.bats
