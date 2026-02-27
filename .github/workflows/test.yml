@@ -24,3 +24,6 @@ jobs:
 
       - name: Run security bats tests
         run: bats tests/security_test.bats
+
+      - name: Run doctor multi mode check
+        run: ./bin/maw doctor --json --exit-code-mode multi
