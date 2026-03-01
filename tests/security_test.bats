@@ -7,6 +7,7 @@ setup() {
   MAW_BIN="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/bin/maw"
   TEST_DIR="$(mktemp -d)"
   cd "$TEST_DIR"
+  REMOTE_DIR="${TEST_DIR}/remote.git"
 
   # テスト用 git リポジトリ作成
   git init --initial-branch=main
@@ -16,6 +17,9 @@ setup() {
   echo '# test' > yarn.lock
   git add .
   git commit -m "initial commit"
+  git init --bare "$REMOTE_DIR"
+  git remote add origin "$REMOTE_DIR"
+  git push -u origin main
 
   # maw 初期化
   "$MAW_BIN" init

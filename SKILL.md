@@ -19,7 +19,7 @@ inputs:
   | target_files    | string[]| SHOULD| 作業対象ファイル/ディレクトリのパス一覧        |
   | issue_number    | string  | MAY   | 紐付ける Issue 番号                           |
   | agent_name      | string  | MAY   | エージェント種別（例: claude, codex）          |
-  | base_branch     | string  | MAY   | 分岐元・マージ先ブランチ（デフォルト: main）    |
+  | base_branch     | string  | MAY   | spawn の分岐元（デフォルト: origin/main）/ merge のマージ先（デフォルト: main） |
   | ttl_minutes     | integer | MAY   | Claim の有効期限（分）。省略時は無期限         |
 
 outputs:
@@ -36,11 +36,12 @@ constraints:
   - "[MUST] 作業完了時は maw handover → maw merge の順で終了する。handover を省略すると次のエージェントがコンテキストを失う。"
   - "[MUST] maw status を作業開始時・終了時に必ず確認する。他エージェントの状況を把握せずに作業を開始してはならない。"
   - "[MUST] maw doctor でエラーが報告された場合は --fix を実行してから作業を開始する。"
+  - "[MUST] maw spawn で --from を省略した場合は origin/main を fetch して分岐する。origin/main の fetch/resolve に失敗した場合は中断し、他ブランチへの無断フォールバックは禁止する。"
   - "[SHOULD] 長時間作業の Claim には適切な TTL を設定する（例: --ttl 120）。"
 
 steps:
   1. "[作業開始前] maw status で現状確認 — 既存 WS の一覧と claim 状況を把握し、競合の可能性があるファイルを特定する。"
-  2. "[WS 作成] maw spawn <workspace_name> [--agent <agent_name>] [--issue <issue_number>] [--from <base_branch>] — すでに WS が存在する場合はスキップ。"
+  2. "[WS 作成] maw spawn <workspace_name> [--agent <agent_name>] [--issue <issue_number>] [--from <base_branch>] — --from 指定時はその分岐元を優先。未指定時は origin/main を fetch して最新を分岐元に使う。origin/main を fetch/resolve できない場合は失敗（フォールバックなし）。すでに WS が存在する場合はスキップ。"
   3. "[ファイル排他] maw claim <target_file_or_dir> [--ttl <minutes>] — 編集する各ファイルまたはディレクトリを claim する。競合（他 WS が claim 済み）の場合は編集を中止してユーザーに報告する。"
   4. "[実装] 通常の作業（編集・コミット・テスト）を行う。worktree は .maw-workspaces/<name>/ にある。追加ファイルが必要になった場合は Step 3 に戻る。"
   5. "[引き継ぎ] maw handover [--workspace <name>] — .maw/handovers/ws-<name>.md を生成する。生成後、Notes セクションに必要な追記を行う。"

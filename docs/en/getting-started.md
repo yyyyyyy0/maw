@@ -62,6 +62,9 @@ maw spawn feature-auth --agent claude --issue 42
 maw spawn feature-auth --agent claude --from develop
 ```
 
+If `--from` is omitted, `maw spawn` fetches `origin/main` and uses the latest fetched commit as the base branch.
+If `origin/main` cannot be fetched or resolved, the command fails with no fallback to other branches.
+
 After creation, a worktree is available at `.maw-workspaces/feature-auth/`.
 For Node.js projects, `node_modules` is shared via symlink (saves disk space).
 

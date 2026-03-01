@@ -62,6 +62,9 @@ maw spawn feature-auth --agent claude --issue 42
 maw spawn feature-auth --agent claude --from develop
 ```
 
+`--from` を省略すると、`maw spawn` は `origin/main` を fetch して最新を分岐元として使用します。
+`origin/main` を fetch/resolve できない場合は失敗し、他ブランチへのフォールバックは行いません。
+
 作成後、`.maw-workspaces/feature-auth/` に worktree が展開されます。
 Node.js プロジェクトでは `node_modules` が symlink で共有されます（ディスク節約）。
 

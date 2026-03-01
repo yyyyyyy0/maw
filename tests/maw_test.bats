@@ -5,6 +5,7 @@ setup() {
   MAW_BIN="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/bin/maw"
   TEST_DIR="$(mktemp -d)"
   cd "$TEST_DIR"
+  REMOTE_DIR="${TEST_DIR}/remote.git"
 
   # テスト用 git リポジトリ作成
   git init --initial-branch=main
@@ -14,6 +15,9 @@ setup() {
   echo '# test' > yarn.lock
   git add .
   git commit -m "initial commit"
+  git init --bare "$REMOTE_DIR"
+  git remote add origin "$REMOTE_DIR"
+  git push -u origin main
 }
 
 teardown() {
@@ -188,6 +192,39 @@ teardown() {
   run "$MAW_BIN" spawn
   [ "$status" -eq 1 ]
   [[ "$output" =~ "ワークスペース名を指定" ]]
+}
+
+@test "maw spawn デフォルト分岐元は current branch ではなく origin/main" {
+  git checkout -b feature/current
+  echo "feature-only" > feature-only.txt
+  git add feature-only.txt
+  git commit -m "feature commit"
+  "$MAW_BIN" init
+  run "$MAW_BIN" spawn test_ws
+  [ "$status" -eq 0 ]
+  local ws_head
+  ws_head="$(git -C ".maw-workspaces/test_ws" rev-parse HEAD)"
+  local origin_main_head
+  origin_main_head="$(git rev-parse origin/main)"
+  [ "$ws_head" = "$origin_main_head" ]
+  [ ! -f ".maw-workspaces/test_ws/feature-only.txt" ]
+}
+
+@test "maw spawn は origin/main が利用不可で --from 未指定なら失敗" {
+  "$MAW_BIN" init
+  git remote remove origin
+  run "$MAW_BIN" spawn test_ws
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "origin/main" ]]
+  [[ "$output" =~ "--from" ]]
+}
+
+@test "maw spawn --from main は origin remote 削除後でも成功" {
+  "$MAW_BIN" init
+  git remote remove origin
+  run "$MAW_BIN" spawn test_ws --from main
+  [ "$status" -eq 0 ]
+  [ -d ".maw-workspaces/test_ws" ]
 }
 
 # ===== maw list =====

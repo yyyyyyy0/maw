@@ -72,7 +72,7 @@ maw spawn <name> [--branch <name>] [--issue <number>] [--agent <name>]
 | `--issue <number>` | Issue number (branch: `issue/<number>-<name>`) | — |
 | `--agent <name>` | Agent type (branch: `<agent>/<name>`) | — |
 | `--isolated` | Install dependencies independently instead of symlinking | false |
-| `--from <branch>` | Base branch to create worktree from | current branch |
+| `--from <branch>` | Base branch to create worktree from (highest priority when set) | `origin/main` (fetched when `--from` is omitted) |
 
 ### Examples
 
@@ -82,15 +82,16 @@ maw spawn feature-auth --agent claude
 maw spawn feature-auth --issue 42
 maw spawn feature-auth --agent claude --issue 42  # branch: claude/feature-auth
 maw spawn feature-auth --isolated                 # independent node_modules
-maw spawn feature-auth --from develop             # branch from develop
+maw spawn feature-auth --from develop             # prefer develop over origin/main
 ```
 
 ### Behavior
 
-1. Create a git worktree on the specified branch
-2. Check out to `.maw-workspaces/<name>/`
-3. Create symlinks per ecosystem config (skipped with `--isolated`)
-4. Register workspace info in `state.json`
+1. If `--from <branch>` is provided, use it as the base branch with top priority
+2. If `--from` is omitted, fetch `origin/main` and use the latest fetched commit as the base branch
+3. If `origin/main` cannot be fetched or resolved, fail (no fallback)
+4. Create a git worktree on the target branch and check out to `.maw-workspaces/<name>/`
+5. Create symlinks per ecosystem config (skipped with `--isolated`) and register workspace info in `state.json`
 
 ---
 
