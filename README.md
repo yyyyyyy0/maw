@@ -39,6 +39,7 @@ maw init
 
 # ワークスペースを作成
 maw spawn feature-auth --agent claude --issue 42
+# --from 未指定時は origin/main を fetch して分岐（取得/解決できない場合は失敗）
 
 # 状況確認
 maw status

@@ -28,7 +28,7 @@ cmd_spawn() {
         echo "  --issue <number>   Issue 番号を紐付け"
         echo "  --agent <name>     エージェント種別 (claude, codex 等)"
         echo "  --isolated         独立依存環境 (symlink ではなく install)"
-        echo "  --from <branch>    分岐元ブランチ (デフォルト: 現在のブランチ)"
+        echo "  --from <branch>    分岐元ブランチ (デフォルト: origin/main を fetch 後に使用)"
         return 0
         ;;
       -*)
@@ -83,7 +83,17 @@ cmd_spawn() {
 
   # 分岐元ブランチ
   if [[ -z "$from_branch" ]]; then
-    from_branch="$(current_branch)"
+    if ! (cd "$root" && git fetch origin main --prune); then
+      log_error "origin/main の取得に失敗しました。--from <branch> を指定して再実行してください。"
+      exit 1
+    fi
+
+    if ! (cd "$root" && git show-ref --verify --quiet refs/remotes/origin/main); then
+      log_error "origin/main が見つかりません。--from <branch> を指定して再実行してください。"
+      exit 1
+    fi
+
+    from_branch="origin/main"
   fi
 
   log_info "ワークスペース '${name}' を作成しています..."

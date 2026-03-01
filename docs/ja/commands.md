@@ -72,7 +72,7 @@ maw spawn <name> [--branch <name>] [--issue <number>] [--agent <name>]
 | `--issue <number>` | Issue 番号（ブランチ: `issue/<number>-<name>`） | — |
 | `--agent <name>` | エージェント種別（ブランチ: `<agent>/<name>`） | — |
 | `--isolated` | symlink ではなく独立した依存をインストール | false |
-| `--from <branch>` | 分岐元ブランチ | 現在のブランチ |
+| `--from <branch>` | 分岐元ブランチ（明示指定時は最優先） | `origin/main`（`--from` 未指定時に fetch） |
 
 ### 使用例
 
@@ -82,15 +82,16 @@ maw spawn feature-auth --agent claude
 maw spawn feature-auth --issue 42
 maw spawn feature-auth --agent claude --issue 42  # ブランチ: claude/feature-auth
 maw spawn feature-auth --isolated                 # 独立した node_modules
-maw spawn feature-auth --from develop             # develop から分岐
+maw spawn feature-auth --from develop             # origin/main ではなく develop を優先
 ```
 
 ### 動作
 
-1. 指定ブランチ名で git worktree を作成
-2. `.maw-workspaces/<name>/` にチェックアウト
-3. ecosystem に応じた symlink を作成（`--isolated` でスキップ）
-4. `state.json` にワークスペース情報を登録
+1. `--from <branch>` を指定した場合、そのブランチを分岐元として優先する
+2. `--from` 未指定の場合、`origin/main` を fetch して最新を分岐元として使う
+3. `origin/main` を fetch/resolve できない場合は失敗（フォールバックなし）
+4. 指定ブランチ名で git worktree を作成し、`.maw-workspaces/<name>/` にチェックアウト
+5. ecosystem に応じた symlink を作成（`--isolated` でスキップ）し、`state.json` にワークスペース情報を登録
 
 ---
 
