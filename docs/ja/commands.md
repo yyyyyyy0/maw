@@ -403,7 +403,7 @@ maw takeover [<name>] [--format md|json|prompt|plan]
   "verification_status": "pending",
   "state": "clean",
   "decisions_count": 2,
-  "risks_count": 1,
+  "risks_count": 0,
   "blockers_count": 0,
   "blockers": [],
   "score": 72,

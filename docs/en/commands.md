@@ -403,7 +403,7 @@ Each action object requires the following keys. Additional fields such as `comma
   "verification_status": "pending",
   "state": "clean",
   "decisions_count": 2,
-  "risks_count": 1,
+  "risks_count": 0,
   "blockers_count": 0,
   "blockers": [],
   "score": 72,
