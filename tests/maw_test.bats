@@ -1279,6 +1279,63 @@ teardown() {
   ' >/dev/null
 }
 
+@test "doctor JSON v2 は lockfile warning score 70 を返す" {
+  "$MAW_BIN" init
+  echo "# changed" >> yarn.lock
+  git add yarn.lock
+  git commit -m "change lockfile"
+
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+
+  echo "$output" | jq -e '
+    .categories.lockfile.status == "warning" and
+    .categories.lockfile.score == 70
+  ' >/dev/null
+}
+
+@test "doctor JSON v2 は stale_claims warning score 80 を返す" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1 --ttl 0
+  sleep 1
+
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+
+  echo "$output" | jq -e '
+    .categories.stale_claims.status == "warning" and
+    .categories.stale_claims.score == 80
+  ' >/dev/null
+}
+
+@test "doctor JSON v2 の health_score はカテゴリ score の整数平均を返す" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1 --ttl 0
+  echo "# changed" >> yarn.lock
+  git add yarn.lock
+  git commit -m "change lockfile"
+  sleep 1
+
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+
+  echo "$output" | jq -e '
+    .health_score == (
+      [
+        .categories.worktree.score,
+        .categories.symlink.score,
+        .categories.lockfile.score,
+        .categories.git.score,
+        .categories.claims.score,
+        .categories.stale_claims.score
+      ] | add / 6 | floor
+    ) and
+    .health_score == 91
+  ' >/dev/null
+}
+
 # ===== Phase 6: --blocked-by オプション =====
 
 @test "maw handover --blocked-by で blocked_by に追加される" {
