@@ -45,6 +45,68 @@ maw doctor --json
 }
 ```
 
+## 公開契約
+
+`maw doctor --json` は公開 JSON 契約です。key 順は固定しませんが、以下の top-level key は必須です。
+
+| key | type | 説明 |
+|-----|------|------|
+| `version` | integer | 現在は `2` |
+| `format` | string | 現在は `"doctor"` |
+| `timestamp` | string | UTC timestamp |
+| `maw_version` | string | `maw` バージョン |
+| `health_score` | integer | `0..100` |
+| `summary` | object | 下記の required subkeys を持つ |
+| `categories` | object | 下記 6 カテゴリを必須で持つ |
+| `checks` | array<object> | 各 entry は下記の最小契約を満たす |
+
+### `summary` required subkeys
+
+| key | type |
+|-----|------|
+| `total_checks` | integer >= 0 |
+| `passed` | integer >= 0 |
+| `failed` | integer >= 0 |
+| `warnings` | integer >= 0 |
+| `fixable` | integer >= 0 |
+
+### `categories` required keys
+
+必須カテゴリは `worktree`, `symlink`, `lockfile`, `git`, `claims`, `stale_claims` です。各カテゴリ object は以下を required とします。
+
+| key | type | 説明 |
+|-----|------|------|
+| `status` | `passed \| warning \| failed` | カテゴリ状態 |
+| `score` | integer | `0..100` |
+
+現在の score 規約:
+- `passed = 100`
+- `failed = 0`
+- `warning = 70`（`symlink`, `lockfile`, `git`）
+- `warning = 80`（`stale_claims`）
+
+### `checks[*]` 最小契約
+
+各 check object は以下を required とします。
+
+| key | type |
+|-----|------|
+| `name` | string |
+| `status` | `passed \| warning \| failed` |
+| `severity` | `none \| warning \| error` |
+| `message` | string |
+| `fixable` | boolean |
+| `category` | `worktree \| symlink \| lockfile \| git \| claims \| stale_claims` |
+
+### Exit code 契約
+
+既定値は `simple` です。
+
+| Mode | 問題なし | warning only | failed issues | invalid mode |
+|------|----------|--------------|---------------|--------------|
+| `simple` | 0 | 0 | 1 | 1 |
+| `multi` | 0 | 2 | 1 | 1 |
+
 ## GitHub Actions での使用例
 
 ### 基本的なヘルスチェック
@@ -198,12 +260,11 @@ if [[ "$fixable" -gt 0 ]]; then
 fi
 ```
 
-## Exit Behavior
+## Default simple mode
 
-| 状態 | Exit Code |
-|------|-----------|
-| 問題なし | 0 |
-| 問題検出時 (`failed > 0`) | 1 |
+`--exit-code-mode` を省略した場合は `simple` が使われます。
+- `failed = 0` かつ warning のみなら `0`
+- `failed > 0` なら `1`
 
 CI で `if: always()` などと組み合わせて結果をキャプチャ可能:
 

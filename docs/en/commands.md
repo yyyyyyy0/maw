@@ -558,14 +558,14 @@ maw doctor [--fix] [--aggressive] [--json]
 |--------|-------------|
 | `--fix` | Auto-repair detected issues |
 | `--aggressive` | Check merged branches & dangling worktrees (with confirmation prompt when using `--fix`) |
-| `--json` | Output results in JSON format (v2 schema, v0.6.0+). Exits with non-zero when issues are detected |
+| `--json` | Output results in JSON format (v2 schema, v0.6.0+). Exit codes follow the `--exit-code-mode` contract |
 
 ### Checks Performed
 
 | Check | Description | `--fix` action |
 |-------|-------------|----------------|
 | Orphaned worktree | In state but no worktree on disk | Remove from state |
-| Orphaned state | Worktree exists but not in state | Add to state |
+| Orphaned state | Worktree exists but not in state | Guidance only (`maw cleanup <ws>` is suggested) |
 | Symlink integrity | Symlinks point to correct paths | Recreate symlinks |
 | Lockfile hash | Lockfile has changed since init | Warn only |
 | Orphaned claim | Claim remains for deleted WS | Delete claim |
@@ -625,12 +625,67 @@ maw doctor [--fix] [--aggressive] [--json]
 }
 ```
 
-**Field Descriptions**:
-- `health_score`: Overall health score (0-100, average of category scores)
-- `categories`: Status and score per category
-  - `status`: passed / warning / failed
-  - `score`: 0-100 (failed=0, warning=70, passed=100)
-- `checks[].category`: Category each check belongs to
+### `doctor --json` Public Contract
+
+`doctor --json` is a public JSON contract. Key order is not fixed, but the following top-level keys are required.
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `version` | integer | Currently `2` |
+| `format` | string | Currently `"doctor"` |
+| `timestamp` | string | UTC timestamp |
+| `maw_version` | string | Current `maw` version |
+| `health_score` | integer | `0..100` |
+| `summary` | object | Must contain the required subkeys below |
+| `categories` | object | Must contain the 6 required category keys below |
+| `checks` | array<object> | Each entry must satisfy the minimum contract below |
+
+### `summary` Required Subkeys
+
+| Key | Type |
+|-----|------|
+| `total_checks` | integer >= 0 |
+| `passed` | integer >= 0 |
+| `failed` | integer >= 0 |
+| `warnings` | integer >= 0 |
+| `fixable` | integer >= 0 |
+
+### `categories` Required Keys
+
+Required categories are `worktree`, `symlink`, `lockfile`, `git`, `claims`, and `stale_claims`. Each category object requires:
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `status` | `passed \| warning \| failed` | Category status |
+| `score` | integer | `0..100` |
+
+Current scoring rules:
+- `passed = 100`
+- `failed = 0`
+- `warning = 70` for `symlink`, `lockfile`, and `git`
+- `warning = 80` for `stale_claims`
+
+### `checks[*]` Minimum Contract
+
+Each check object requires:
+
+| Key | Type |
+|-----|------|
+| `name` | string |
+| `status` | `passed \| warning \| failed` |
+| `severity` | `none \| warning \| error` |
+| `message` | string |
+| `fixable` | boolean |
+| `category` | `worktree \| symlink \| lockfile \| git \| claims \| stale_claims` |
+
+### Exit Code Contract
+
+The default mode is `simple`.
+
+| Mode | No issues | Warning only | Failed issues | Invalid mode |
+|------|-----------|--------------|---------------|--------------|
+| `simple` | 0 | 0 | 1 | 1 |
+| `multi` | 0 | 2 | 1 | 1 |
 
 ---
 
