@@ -549,7 +549,7 @@ Check environment integrity.
 ### Synopsis
 
 ```bash
-maw doctor [--fix] [--aggressive] [--json]
+maw doctor [--fix] [--aggressive] [--json] [--exit-code-mode simple|multi]
 ```
 
 ### Options
@@ -559,6 +559,7 @@ maw doctor [--fix] [--aggressive] [--json]
 | `--fix` | Auto-repair detected issues |
 | `--aggressive` | Check merged branches & dangling worktrees (with confirmation prompt when using `--fix`) |
 | `--json` | Output results in JSON format (v2 schema, v0.6.0+). Exit codes follow the `--exit-code-mode` contract |
+| `--exit-code-mode simple\|multi` | Select exit code policy for `--json` (`simple`: no issues/warning-only=`0`, failed=`1`; `multi`: no issues=`0`, warning-only=`2`, failed=`1`) |
 
 ### Checks Performed
 
@@ -567,7 +568,7 @@ maw doctor [--fix] [--aggressive] [--json]
 | Orphaned worktree | In state but no worktree on disk | Remove from state |
 | Orphaned state | Worktree exists but not in state | Guidance only (`maw cleanup <ws>` is suggested) |
 | Symlink integrity | Symlinks point to correct paths | Recreate symlinks |
-| Lockfile hash | Lockfile has changed since init | Warn only |
+| Lockfile hash | Lockfile has changed since init | Update saved hash and print reinstall guidance for isolated workspaces |
 | Orphaned claim | Claim remains for deleted WS | Delete claim |
 | Stale claim | Claim TTL has expired | Delete claim |
 
@@ -596,13 +597,13 @@ maw doctor [--fix] [--aggressive] [--json]
   "format": "doctor",
   "timestamp": "2026-02-24T10:00:00Z",
   "maw_version": "0.6.0",
-  "health_score": 85,
+  "health_score": 75,
   "summary": {
     "total_checks": 6,
-    "passed": 4,
+    "passed": 3,
     "failed": 1,
-    "warnings": 1,
-    "fixable": 1
+    "warnings": 2,
+    "fixable": 3
   },
   "categories": {
     "worktree": {"status": "passed", "score": 100},
@@ -635,7 +636,7 @@ maw doctor [--fix] [--aggressive] [--json]
 | `format` | string | Currently `"doctor"` |
 | `timestamp` | string | UTC timestamp |
 | `maw_version` | string | Current `maw` version |
-| `health_score` | integer | `0..100` |
+| `health_score` | integer | `floor(sum(categories[*].score) / 6)` |
 | `summary` | object | Must contain the required subkeys below |
 | `categories` | object | Must contain the 6 required category keys below |
 | `checks` | array<object> | Each entry must satisfy the minimum contract below |
@@ -664,6 +665,9 @@ Current scoring rules:
 - `failed = 0`
 - `warning = 70` for `symlink`, `lockfile`, and `git`
 - `warning = 80` for `stale_claims`
+
+`health_score` is the integer average of the 6 category scores:
+`floor((worktree + symlink + lockfile + git + claims + stale_claims) / 6)`.
 
 ### `checks[*]` Minimum Contract
 

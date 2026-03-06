@@ -16,7 +16,7 @@ maw doctor --json
   "format": "doctor",
   "timestamp": "2025-02-25T12:34:56Z",
   "maw_version": "0.6.1",
-  "health_score": 85,
+  "health_score": 83,
   "summary": {
     "total_checks": 6,
     "passed": 5,
@@ -55,7 +55,7 @@ maw doctor --json
 | `format` | string | 現在は `"doctor"` |
 | `timestamp` | string | UTC timestamp |
 | `maw_version` | string | `maw` バージョン |
-| `health_score` | integer | `0..100` |
+| `health_score` | integer | `floor(sum(categories[*].score) / 6)` |
 | `summary` | object | 下記の required subkeys を持つ |
 | `categories` | object | 下記 6 カテゴリを必須で持つ |
 | `checks` | array<object> | 各 entry は下記の最小契約を満たす |
@@ -84,6 +84,9 @@ maw doctor --json
 - `failed = 0`
 - `warning = 70`（`symlink`, `lockfile`, `git`）
 - `warning = 80`（`stale_claims`）
+
+`health_score` は 6 カテゴリの score の整数平均です。
+`floor((worktree + symlink + lockfile + git + claims + stale_claims) / 6)` で算出します。
 
 ### `checks[*]` 最小契約
 

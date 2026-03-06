@@ -16,7 +16,7 @@ Example output:
   "format": "doctor",
   "timestamp": "2025-02-25T12:34:56Z",
   "maw_version": "0.6.1",
-  "health_score": 85,
+  "health_score": 83,
   "summary": {
     "total_checks": 6,
     "passed": 5,
@@ -55,7 +55,7 @@ Example output:
 | `format` | string | Currently `"doctor"` |
 | `timestamp` | string | UTC timestamp |
 | `maw_version` | string | Current `maw` version |
-| `health_score` | integer | `0..100` |
+| `health_score` | integer | `floor(sum(categories[*].score) / 6)` |
 | `summary` | object | Must contain the required subkeys below |
 | `categories` | object | Must contain the 6 required category keys below |
 | `checks` | array<object> | Each entry must satisfy the minimum contract below |
@@ -84,6 +84,9 @@ Current score rules:
 - `failed = 0`
 - `warning = 70` for `symlink`, `lockfile`, and `git`
 - `warning = 80` for `stale_claims`
+
+`health_score` is the integer average of the 6 category scores:
+`floor((worktree + symlink + lockfile + git + claims + stale_claims) / 6)`.
 
 ### `checks[*]` Minimum Contract
 

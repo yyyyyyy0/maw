@@ -549,7 +549,7 @@ maw cleanup --all --dry-run
 ### 概要
 
 ```bash
-maw doctor [--fix] [--aggressive] [--json]
+maw doctor [--fix] [--aggressive] [--json] [--exit-code-mode simple|multi]
 ```
 
 ### オプション
@@ -559,6 +559,7 @@ maw doctor [--fix] [--aggressive] [--json]
 | `--fix` | 検出された問題を自動修復 |
 | `--aggressive` | マージ済みブランチ・dangling worktree の削除チェック（`--fix` 時に確認プロンプト付きで削除実行） |
 | `--json` | 結果を JSON 形式で出力（v2 スキーマ、v0.6.0 以降）。exit code は `--exit-code-mode` 契約に従う |
+| `--exit-code-mode simple\|multi` | `--json` の exit code 方針を選択（`simple`: 問題なし/ warning only=`0`、failed=`1`; `multi`: 問題なし=`0`、warning only=`2`、failed=`1`） |
 
 ### チェック項目
 
@@ -567,7 +568,7 @@ maw doctor [--fix] [--aggressive] [--json]
 | Orphaned worktree | state に存在するが worktree がない | state から削除 |
 | Orphaned state | worktree はあるが state にない | 案内のみ（`maw cleanup <ws>` を表示） |
 | Symlink 整合性 | symlink が正しいパスを指しているか | symlink を再作成 |
-| Lockfile hash | lockfile が更新されていないか | 警告のみ |
+| Lockfile hash | lockfile が更新されていないか | 保存済み hash を更新し、isolated workspace 向けに再 install を案内 |
 | Orphaned claim | 削除済み WS の claim が残っている | claim を削除 |
 | Stale claim | TTL 期限切れの claim | claim を削除 |
 
@@ -596,13 +597,13 @@ maw doctor [--fix] [--aggressive] [--json]
   "format": "doctor",
   "timestamp": "2026-02-24T10:00:00Z",
   "maw_version": "0.6.0",
-  "health_score": 85,
+  "health_score": 75,
   "summary": {
     "total_checks": 6,
-    "passed": 4,
+    "passed": 3,
     "failed": 1,
-    "warnings": 1,
-    "fixable": 1
+    "warnings": 2,
+    "fixable": 3
   },
   "categories": {
     "worktree": {"status": "passed", "score": 100},
@@ -635,7 +636,7 @@ maw doctor [--fix] [--aggressive] [--json]
 | `format` | string | 現在は `"doctor"` |
 | `timestamp` | string | UTC timestamp |
 | `maw_version` | string | `maw` のバージョン |
-| `health_score` | integer | `0..100` |
+| `health_score` | integer | `floor(sum(categories[*].score) / 6)` |
 | `summary` | object | 下記の required subkeys を持つ |
 | `categories` | object | 下記 6 カテゴリを必須で持つ |
 | `checks` | array<object> | 各 entry は下記の最小契約を満たす |
@@ -664,6 +665,9 @@ maw doctor [--fix] [--aggressive] [--json]
 - `failed = 0`
 - `warning = 70`（`symlink`, `lockfile`, `git`）
 - `warning = 80`（`stale_claims`）
+
+`health_score` は 6 カテゴリの score の整数平均です。
+`floor((worktree + symlink + lockfile + git + claims + stale_claims) / 6)` で算出します。
 
 ### `checks[*]` 最小契約
 
