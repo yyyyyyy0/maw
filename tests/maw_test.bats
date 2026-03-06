@@ -1043,43 +1043,77 @@ teardown() {
 
 # ===== Phase 6: Takeover plan スコアリング =====
 
-@test "maw takeover --format plan で score と category が出力される" {
+@test "maw takeover --format plan は valid JSON と required top-level keys/type を返す" {
   "$MAW_BIN" init
   "$MAW_BIN" spawn ws1 --agent claude
   "$MAW_BIN" handover --workspace ws1
   run "$MAW_BIN" takeover ws1 --format plan
   [ "$status" -eq 0 ]
-  echo "$output" | jq '.score' >/dev/null 2>&1
-  echo "$output" | jq '.category' >/dev/null 2>&1
+  echo "$output" | jq -e '
+    type == "object" and
+    (has("id") and (.id | type == "string")) and
+    (has("summary") and (.summary | type == "string")) and
+    (has("evidence_refs") and (.evidence_refs | type == "array") and all(.evidence_refs[]?; type == "string")) and
+    (has("workspace") and (.workspace | type == "string")) and
+    (has("branch") and (.branch | type == "string")) and
+    (has("verification_status") and (.verification_status | type == "string")) and
+    (has("state") and (.state | type == "string")) and
+    (has("decisions_count") and (.decisions_count | type == "number") and (.decisions_count | floor == . and . >= 0)) and
+    (has("risks_count") and (.risks_count | type == "number") and (.risks_count | floor == . and . >= 0)) and
+    (has("blockers_count") and (.blockers_count | type == "number") and (.blockers_count | floor == . and . >= 0)) and
+    (has("blockers") and (.blockers | type == "array") and all(.blockers[]?; type == "string")) and
+    (has("score") and (.score | type == "number") and (.score | floor == . and . >= 0 and . <= 100)) and
+    (has("category") and (.category | type == "string")) and
+    (has("priority_actions") and (.priority_actions | type == "array")) and
+    (has("resume_commands") and (.resume_commands | type == "array") and all(.resume_commands[]?; type == "string"))
+  ' >/dev/null
 }
 
-@test "takeover plan の ready カテゴリ (スコア 80+)" {
+@test "takeover plan canonical scoring: passed + clean + no blockers + no risks => 100/ready" {
   "$MAW_BIN" init
   "$MAW_BIN" spawn ws1 --agent claude
   "$MAW_BIN" handover --workspace ws1
-  # verification_status=passed にしてスコアを上げる
   "$MAW_BIN" handover --workspace ws1 --verification-status passed
   local output
   output="$("$MAW_BIN" takeover ws1 --format plan)"
-  local category
+  local score category
+  score="$(echo "$output" | jq -r '.score')"
   category="$(echo "$output" | jq -r '.category')"
-  [ "$category" = "ready" ] || [ "$category" = "caution" ]
+  [ "$score" -eq 100 ]
+  [ "$category" = "ready" ]
 }
 
-@test "takeover plan の blocked カテゴリ (スコア 0-49)" {
+@test "takeover plan canonical scoring: pending + clean + no blockers + no risks => 72/caution" {
   "$MAW_BIN" init
   "$MAW_BIN" spawn ws1 --agent claude
-  # state を dirty にするために未コミット変更を作成
-  echo "dirty" > ".maw-workspaces/ws1/dirty.txt"
-  # dirty 状態で handover 生成
   "$MAW_BIN" handover --workspace ws1
-  # failed と critical risk でスコアを下げる
+
+  local output
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+
+  local score category
+  score="$(echo "$output" | jq -r '.score')"
+  category="$(echo "$output" | jq -r '.category')"
+  [ "$score" -eq 72 ]
+  [ "$category" = "caution" ]
+}
+
+@test "takeover plan canonical scoring: failed + dirty + 3 blockers + critical risk => 20/blocked" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  echo "dirty" > ".maw-workspaces/ws1/dirty.txt"
+  "$MAW_BIN" handover --workspace ws1
   "$MAW_BIN" handover --workspace ws1 --verification-status failed
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker 1"
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker 2"
+  "$MAW_BIN" handover --workspace ws1 --blocked-by "Blocker 3"
   "$MAW_BIN" handover --workspace ws1 --risk "重大な問題" --risk-severity critical
   local output
   output="$("$MAW_BIN" takeover ws1 --format plan)"
-  local category
+  local score category
+  score="$(echo "$output" | jq -r '.score')"
   category="$(echo "$output" | jq -r '.category')"
+  [ "$score" -eq 20 ]
   [ "$category" = "blocked" ]
 }
 
@@ -1831,7 +1865,7 @@ teardown() {
 
 # ===== v0.8.0: takeover priority_actions 強化 =====
 
-@test "takeover --format plan の priority_actions に priority_level フィールドがある" {
+@test "takeover --format plan の priority_actions は最小契約を満たす" {
   "$MAW_BIN" init
   "$MAW_BIN" spawn ws1 --agent claude
   "$MAW_BIN" handover --workspace ws1
@@ -1839,10 +1873,15 @@ teardown() {
   local output
   output="$("$MAW_BIN" takeover ws1 --format plan)"
 
-  # priority_level が存在する
-  local has_level
-  has_level="$(echo "$output" | jq '[.priority_actions[] | has("priority_level")] | all')"
-  [ "$has_level" = "true" ]
+  echo "$output" | jq -e '
+    (.priority_actions | type == "array") and
+    ([.priority_actions[] |
+      (has("priority_level") and (.priority_level | type == "number") and (.priority_level | floor == . and . >= 1 and . <= 3)) and
+      (has("action") and (.action | type == "string")) and
+      (has("description") and (.description | type == "string")) and
+      (has("priority") and (.priority == "low" or .priority == "medium" or .priority == "high"))
+    ] | all)
+  ' >/dev/null
 }
 
 @test "verification_status=failed で priority_level 1 の verify アクションが生成される" {
@@ -2108,6 +2147,28 @@ teardown() {
   [ "$id" != "null" ]
   [ "$summary" = "テスト中" ]
   [ "$er_len" -eq 1 ]
+}
+
+@test "maw takeover --format plan は id/summary/evidence_refs が欠けた bundle でも既定値で成功する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  local json_file=".maw/handovers/ws-ws1.json"
+  jq 'del(.id, .summary, .evidence_refs)' "$json_file" > "${json_file}.tmp" \
+    && mv "${json_file}.tmp" "$json_file"
+
+  run "$MAW_BIN" takeover ws1 --format plan
+  [ "$status" -eq 0 ]
+
+  local id summary er_len
+  id="$(echo "$output" | jq -r '.id')"
+  summary="$(echo "$output" | jq -r '.summary')"
+  er_len="$(echo "$output" | jq '.evidence_refs | length')"
+
+  [ "$id" = "" ]
+  [ "$summary" = "" ]
+  [ "$er_len" -eq 0 ]
 }
 
 @test "maw takeover --format prompt の出力に Summary セクションが含まれる（summary 非空の場合）" {
