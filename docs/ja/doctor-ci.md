@@ -16,7 +16,7 @@ maw doctor --json
   "format": "doctor",
   "timestamp": "2025-02-25T12:34:56Z",
   "maw_version": "0.6.1",
-  "health_score": 85,
+  "health_score": 83,
   "summary": {
     "total_checks": 6,
     "passed": 5,
@@ -44,6 +44,71 @@ maw doctor --json
   ]
 }
 ```
+
+## 公開契約
+
+`maw doctor --json` は公開 JSON 契約です。key 順は固定しませんが、以下の top-level key は必須です。
+
+| key | type | 説明 |
+|-----|------|------|
+| `version` | integer | 現在は `2` |
+| `format` | string | 現在は `"doctor"` |
+| `timestamp` | string | UTC timestamp |
+| `maw_version` | string | `maw` バージョン |
+| `health_score` | integer | `floor(sum(categories[*].score) / 6)` |
+| `summary` | object | 下記の required subkeys を持つ |
+| `categories` | object | 下記 6 カテゴリを必須で持つ |
+| `checks` | array<object> | 各 entry は下記の最小契約を満たす |
+
+### `summary` required subkeys
+
+| key | type |
+|-----|------|
+| `total_checks` | integer >= 0 |
+| `passed` | integer >= 0 |
+| `failed` | integer >= 0 |
+| `warnings` | integer >= 0 |
+| `fixable` | integer >= 0 |
+
+### `categories` required keys
+
+必須カテゴリは `worktree`, `symlink`, `lockfile`, `git`, `claims`, `stale_claims` です。各カテゴリ object は以下を required とします。
+
+| key | type | 説明 |
+|-----|------|------|
+| `status` | `passed \| warning \| failed` | カテゴリ状態 |
+| `score` | integer | `0..100` |
+
+現在の score 規約:
+- `passed = 100`
+- `failed = 0`
+- `warning = 70`（`symlink`, `lockfile`, `git`）
+- `warning = 80`（`stale_claims`）
+
+`health_score` は 6 カテゴリの score の整数平均です。
+`floor((worktree + symlink + lockfile + git + claims + stale_claims) / 6)` で算出します。
+
+### `checks[*]` 最小契約
+
+各 check object は以下を required とします。
+
+| key | type |
+|-----|------|
+| `name` | string |
+| `status` | `passed \| warning \| failed` |
+| `severity` | `none \| warning \| error` |
+| `message` | string |
+| `fixable` | boolean |
+| `category` | `worktree \| symlink \| lockfile \| git \| claims \| stale_claims` |
+
+### Exit code 契約
+
+既定値は `simple` です。
+
+| Mode | 問題なし | warning only | failed issues | invalid mode |
+|------|----------|--------------|---------------|--------------|
+| `simple` | 0 | 0 | 1 | 1 |
+| `multi` | 0 | 2 | 1 | 1 |
 
 ## GitHub Actions での使用例
 
@@ -74,7 +139,7 @@ jobs:
 
       - name: Check workspace health
         run: |
-          health=$(maw doctor --json)
+          health=$(maw doctor --json || true)
           echo "$health"
 
           # サマリーをチェック
@@ -92,7 +157,7 @@ jobs:
 ```yaml
       - name: Check specific categories
         run: |
-          health=$(maw doctor --json)
+          health=$(maw doctor --json || true)
 
           # worktree ステータス
           worktree_status=$(echo "$health" | jq -r '.categories.worktree.status')
@@ -121,7 +186,7 @@ jobs:
       - name: Doctor with detailed output
         run: |
           # JSON と通常出力を両方取得
-          health=$(maw doctor --json)
+          health=$(maw doctor --json || true)
 
           # 失敗したチェックを抽出
           failed_checks=$(echo "$health" | jq -r '.checks[] | select(.status == "failed") | "- \(.name): \(.message)"')
@@ -139,7 +204,7 @@ jobs:
       - name: Report health status
         if: always()
         run: |
-          health=$(maw doctor --json)
+          health=$(maw doctor --json || true)
           score=$(echo "$health" | jq -r '.health_score')
           failed=$(echo "$health" | jq -r '.summary.failed')
           warnings=$(echo "$health" | jq -r '.summary.warnings')
@@ -157,6 +222,9 @@ jobs:
 ```
 
 ## jq での活用例
+
+GitHub Actions では JSON を parse する前に `health=$(maw doctor --json || true)` の形を推奨します。
+既定 shell は `bash -e` のため、failed issue があると `jq` 実行前に step が終了するためです。
 
 ### サマリー取得
 
@@ -198,12 +266,11 @@ if [[ "$fixable" -gt 0 ]]; then
 fi
 ```
 
-## Exit Behavior
+## Default simple mode
 
-| 状態 | Exit Code |
-|------|-----------|
-| 問題なし | 0 |
-| 問題検出時 (`failed > 0`) | 1 |
+`--exit-code-mode` を省略した場合は `simple` が使われます。
+- `failed = 0` かつ warning のみなら `0`
+- `failed > 0` なら `1`
 
 CI で `if: always()` などと組み合わせて結果をキャプチャ可能:
 
@@ -273,7 +340,7 @@ test:
 
     - name: Pre-merge health check
       run: |
-        health=$(maw doctor --json)
+        health=$(maw doctor --json || true)
         failed=$(echo "$health" | jq -r '.summary.failed')
         if [[ "$failed" -gt 0 ]]; then
           echo "::error::Cannot merge with failed health checks"

@@ -317,6 +317,31 @@ teardown() {
   [ "$ws" = "null" ]
 }
 
+@test "maw doctor --fix は lockfile hash を更新して再 install 案内を出す" {
+  "$MAW_BIN" init
+  local before_hash
+  before_hash="$(cat .maw/lockfile-hash)"
+
+  echo "# changed" >> yarn.lock
+
+  local expected_hash
+  if command -v sha256sum >/dev/null 2>&1; then
+    expected_hash="$(sha256sum yarn.lock | awk '{print $1}')"
+  else
+    expected_hash="$(shasum -a 256 yarn.lock | awk '{print $1}')"
+  fi
+
+  run "$MAW_BIN" doctor --fix
+  [ "$status" -eq 0 ]
+
+  local after_hash
+  after_hash="$(cat .maw/lockfile-hash)"
+  [ "$after_hash" != "$before_hash" ]
+  [ "$after_hash" = "$expected_hash" ]
+  [[ "$output" =~ "lockfile hash を更新しました" ]]
+  [[ "$output" =~ "yarn install" ]]
+}
+
 # ===== maw status =====
 
 @test "maw status はワークスペース一覧を表示する" {
@@ -1137,6 +1162,24 @@ teardown() {
   [ "$format" = "doctor" ]
 }
 
+@test "maw doctor --json は required top-level keys/type を返す" {
+  "$MAW_BIN" init
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+
+  echo "$output" | jq -e '
+    type == "object" and
+    (has("version") and (.version | type == "number") and .version == 2) and
+    (has("format") and (.format | type == "string") and .format == "doctor") and
+    (has("timestamp") and (.timestamp | type == "string")) and
+    (has("maw_version") and (.maw_version | type == "string")) and
+    (has("health_score") and (.health_score | type == "number") and (.health_score | floor == . and . >= 0 and . <= 100)) and
+    (has("summary") and (.summary | type == "object")) and
+    (has("categories") and (.categories | type == "object")) and
+    (has("checks") and (.checks | type == "array"))
+  ' >/dev/null
+}
+
 @test "doctor JSON v2 に maw_version フィールドがある" {
   "$MAW_BIN" init
   local output
@@ -1157,6 +1200,39 @@ teardown() {
   [ "$health" -le 100 ]
 }
 
+@test "doctor JSON v2 の summary は required keys/type を返す" {
+  "$MAW_BIN" init
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+
+  echo "$output" | jq -e '
+    .summary |
+    type == "object" and
+    (has("total_checks") and (.total_checks | type == "number") and (.total_checks | floor == . and . >= 0)) and
+    (has("passed") and (.passed | type == "number") and (.passed | floor == . and . >= 0)) and
+    (has("failed") and (.failed | type == "number") and (.failed | floor == . and . >= 0)) and
+    (has("warnings") and (.warnings | type == "number") and (.warnings | floor == . and . >= 0)) and
+    (has("fixable") and (.fixable | type == "number") and (.fixable | floor == . and . >= 0)) and
+    (.passed + .failed + .warnings == .total_checks)
+  ' >/dev/null
+}
+
+@test "doctor JSON v2 の summary counts は checks と一致する" {
+  "$MAW_BIN" init
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+
+  echo "$output" | jq -e '
+    .summary as $summary |
+    .checks as $checks |
+    ($checks | length) == $summary.total_checks and
+    ([ $checks[] | select(.status == "passed") ] | length) == $summary.passed and
+    ([ $checks[] | select(.status == "failed") ] | length) == $summary.failed and
+    ([ $checks[] | select(.status == "warning") ] | length) == $summary.warnings and
+    ([ $checks[] | select(.fixable == true) ] | length) == $summary.fixable
+  ' >/dev/null
+}
+
 @test "doctor JSON v2 に categories オブジェクトがある" {
   "$MAW_BIN" init
   local output
@@ -1167,6 +1243,22 @@ teardown() {
   echo "$output" | jq '.categories.git' >/dev/null 2>&1
   echo "$output" | jq '.categories.claims' >/dev/null 2>&1
   echo "$output" | jq '.categories.stale_claims' >/dev/null 2>&1
+}
+
+@test "doctor JSON v2 の categories は required keys/type を返す" {
+  "$MAW_BIN" init
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+
+  echo "$output" | jq -e '
+    .categories as $categories |
+    ($categories | keys | sort) == ["claims", "git", "lockfile", "stale_claims", "symlink", "worktree"] and
+    ([ $categories[] |
+      (type == "object") and
+      (has("status") and (.status == "passed" or .status == "warning" or .status == "failed")) and
+      (has("score") and (.score | type == "number") and (.score | floor == . and . >= 0 and . <= 100))
+    ] | all)
+  ' >/dev/null
 }
 
 @test "doctor JSON v2 のカテゴリに status と score がある" {
@@ -1191,6 +1283,82 @@ teardown() {
   local category
   category="$(echo "$output" | jq -r '.checks[0].category')"
   [ "$category" != "null" ]
+}
+
+@test "doctor JSON v2 の checks entry は required keys/type を返す" {
+  "$MAW_BIN" init
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+
+  echo "$output" | jq -e '
+    (.checks | length) > 0 and
+    ([.checks[] |
+      (type == "object") and
+      (has("name") and (.name | type == "string")) and
+      (has("status") and (.status == "passed" or .status == "warning" or .status == "failed")) and
+      (has("severity") and (.severity == "none" or .severity == "warning" or .severity == "error")) and
+      (has("message") and (.message | type == "string")) and
+      (has("fixable") and (.fixable | type == "boolean")) and
+      (has("category") and (.category == "worktree" or .category == "symlink" or .category == "lockfile" or .category == "git" or .category == "claims" or .category == "stale_claims"))
+    ] | all)
+  ' >/dev/null
+}
+
+@test "doctor JSON v2 は lockfile warning score 70 を返す" {
+  "$MAW_BIN" init
+  echo "# changed" >> yarn.lock
+  git add yarn.lock
+  git commit -m "change lockfile"
+
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+
+  echo "$output" | jq -e '
+    .categories.lockfile.status == "warning" and
+    .categories.lockfile.score == 70
+  ' >/dev/null
+}
+
+@test "doctor JSON v2 は stale_claims warning score 80 を返す" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1 --ttl 0
+  sleep 1
+
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+
+  echo "$output" | jq -e '
+    .categories.stale_claims.status == "warning" and
+    .categories.stale_claims.score == 80
+  ' >/dev/null
+}
+
+@test "doctor JSON v2 の health_score はカテゴリ score の整数平均を返す" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" claim src/auth.ts --workspace ws1 --ttl 0
+  echo "# changed" >> yarn.lock
+  git add yarn.lock
+  git commit -m "change lockfile"
+  sleep 1
+
+  local output
+  output="$("$MAW_BIN" doctor --json)"
+
+  echo "$output" | jq -e '
+    .health_score == (
+      [
+        .categories.worktree.score,
+        .categories.symlink.score,
+        .categories.lockfile.score,
+        .categories.git.score,
+        .categories.claims.score,
+        .categories.stale_claims.score
+      ] | add / 6 | floor
+    ) and
+    .health_score == 91
+  ' >/dev/null
 }
 
 # ===== Phase 6: --blocked-by オプション =====
@@ -1416,6 +1584,22 @@ teardown() {
   [ "$lockfile_msg" = "No package manager detected" ]
 }
 
+@test "maw doctor --json のデフォルト exit mode は simple で warning-only なら exit 0" {
+  "$MAW_BIN" init
+  echo "# changed" >> yarn.lock
+  git add yarn.lock
+  git commit -m "change lockfile"
+
+  run "$MAW_BIN" doctor --json
+  [ "$status" -eq 0 ]
+
+  local warnings failed
+  warnings="$(echo "$output" | jq -r '.summary.warnings')"
+  failed="$(echo "$output" | jq -r '.summary.failed')"
+  [ "$warnings" -gt 0 ]
+  [ "$failed" -eq 0 ]
+}
+
 @test "maw doctor --json は問題検出時に 非0 で終了する" {
   "$MAW_BIN" init
   "$MAW_BIN" spawn ws1
@@ -1452,6 +1636,19 @@ teardown() {
 
   run "$MAW_BIN" doctor --json --exit-code-mode simple
   [ "$status" -eq 1 ]
+}
+
+@test "maw doctor --json --exit-code-mode multi は問題なしで exit 0" {
+  "$MAW_BIN" init
+
+  run "$MAW_BIN" doctor --json --exit-code-mode multi
+  [ "$status" -eq 0 ]
+
+  local warnings failed
+  warnings="$(echo "$output" | jq -r '.summary.warnings')"
+  failed="$(echo "$output" | jq -r '.summary.failed')"
+  [ "$warnings" -eq 0 ]
+  [ "$failed" -eq 0 ]
 }
 
 @test "maw doctor --json --exit-code-mode multi は warning-only で exit 2" {

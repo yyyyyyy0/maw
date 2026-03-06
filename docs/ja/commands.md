@@ -549,7 +549,7 @@ maw cleanup --all --dry-run
 ### 概要
 
 ```bash
-maw doctor [--fix] [--aggressive] [--json]
+maw doctor [--fix] [--aggressive] [--json] [--exit-code-mode simple|multi]
 ```
 
 ### オプション
@@ -558,16 +558,17 @@ maw doctor [--fix] [--aggressive] [--json]
 |-----------|------|
 | `--fix` | 検出された問題を自動修復 |
 | `--aggressive` | マージ済みブランチ・dangling worktree の削除チェック（`--fix` 時に確認プロンプト付きで削除実行） |
-| `--json` | 結果を JSON 形式で出力（v2 スキーマ、v0.6.0 以降）。問題検出時は 非0 で終了 |
+| `--json` | 結果を JSON 形式で出力（v2 スキーマ、v0.6.0 以降）。exit code は `--exit-code-mode` 契約に従う |
+| `--exit-code-mode simple\|multi` | `--json` の exit code 方針を選択（`simple`: 問題なし/ warning only=`0`、failed=`1`; `multi`: 問題なし=`0`、warning only=`2`、failed=`1`） |
 
 ### チェック項目
 
 | チェック | 説明 | `--fix` での対応 |
 |---------|------|-----------------|
 | Orphaned worktree | state に存在するが worktree がない | state から削除 |
-| Orphaned state | worktree はあるが state にない | state に追加 |
+| Orphaned state | worktree はあるが state にない | 案内のみ（`maw cleanup <ws>` を表示） |
 | Symlink 整合性 | symlink が正しいパスを指しているか | symlink を再作成 |
-| Lockfile hash | lockfile が更新されていないか | 警告のみ |
+| Lockfile hash | lockfile が更新されていないか | 保存済み hash を更新し、isolated workspace 向けに再 install を案内 |
 | Orphaned claim | 削除済み WS の claim が残っている | claim を削除 |
 | Stale claim | TTL 期限切れの claim | claim を削除 |
 
@@ -596,13 +597,13 @@ maw doctor [--fix] [--aggressive] [--json]
   "format": "doctor",
   "timestamp": "2026-02-24T10:00:00Z",
   "maw_version": "0.6.0",
-  "health_score": 85,
+  "health_score": 75,
   "summary": {
     "total_checks": 6,
-    "passed": 4,
+    "passed": 3,
     "failed": 1,
-    "warnings": 1,
-    "fixable": 1
+    "warnings": 2,
+    "fixable": 3
   },
   "categories": {
     "worktree": {"status": "passed", "score": 100},
@@ -625,12 +626,70 @@ maw doctor [--fix] [--aggressive] [--json]
 }
 ```
 
-**フィールド説明**:
-- `health_score`: 全体ヘルススコア (0-100、カテゴリスコアの平均)
-- `categories`: カテゴリ別ステータスとスコア
-  - `status`: passed / warning / failed
-  - `score`: 0-100 (failed=0, warning=70, passed=100)
-- `checks[].category`: 各チェックが属するカテゴリ
+### `doctor --json` 公開契約
+
+`doctor --json` は公開 JSON 契約です。key 順は固定しませんが、以下の top-level key は必須です。
+
+| key | type | 説明 |
+|-----|------|------|
+| `version` | integer | 現在は `2` |
+| `format` | string | 現在は `"doctor"` |
+| `timestamp` | string | UTC timestamp |
+| `maw_version` | string | `maw` のバージョン |
+| `health_score` | integer | `floor(sum(categories[*].score) / 6)` |
+| `summary` | object | 下記の required subkeys を持つ |
+| `categories` | object | 下記 6 カテゴリを必須で持つ |
+| `checks` | array<object> | 各 entry は下記の最小契約を満たす |
+
+### `summary` required subkeys
+
+| key | type |
+|-----|------|
+| `total_checks` | integer >= 0 |
+| `passed` | integer >= 0 |
+| `failed` | integer >= 0 |
+| `warnings` | integer >= 0 |
+| `fixable` | integer >= 0 |
+
+### `categories` required keys
+
+必須カテゴリは `worktree`, `symlink`, `lockfile`, `git`, `claims`, `stale_claims` です。各カテゴリ object は以下を required とします。
+
+| key | type | 説明 |
+|-----|------|------|
+| `status` | `passed \| warning \| failed` | カテゴリ状態 |
+| `score` | integer | `0..100` |
+
+現在のスコア規約:
+- `passed = 100`
+- `failed = 0`
+- `warning = 70`（`symlink`, `lockfile`, `git`）
+- `warning = 80`（`stale_claims`）
+
+`health_score` は 6 カテゴリの score の整数平均です。
+`floor((worktree + symlink + lockfile + git + claims + stale_claims) / 6)` で算出します。
+
+### `checks[*]` 最小契約
+
+各 check object は以下を required とします。
+
+| key | type |
+|-----|------|
+| `name` | string |
+| `status` | `passed \| warning \| failed` |
+| `severity` | `none \| warning \| error` |
+| `message` | string |
+| `fixable` | boolean |
+| `category` | `worktree \| symlink \| lockfile \| git \| claims \| stale_claims` |
+
+### Exit code 契約
+
+既定値は `simple` です。
+
+| Mode | 問題なし | warning only | failed issues | invalid mode |
+|------|----------|--------------|---------------|--------------|
+| `simple` | 0 | 0 | 1 | 1 |
+| `multi` | 0 | 2 | 1 | 1 |
 
 ---
 
