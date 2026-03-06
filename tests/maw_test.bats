@@ -317,6 +317,31 @@ teardown() {
   [ "$ws" = "null" ]
 }
 
+@test "maw doctor --fix は lockfile hash を更新して再 install 案内を出す" {
+  "$MAW_BIN" init
+  local before_hash
+  before_hash="$(cat .maw/lockfile-hash)"
+
+  echo "# changed" >> yarn.lock
+
+  local expected_hash
+  if command -v sha256sum >/dev/null 2>&1; then
+    expected_hash="$(sha256sum yarn.lock | awk '{print $1}')"
+  else
+    expected_hash="$(shasum -a 256 yarn.lock | awk '{print $1}')"
+  fi
+
+  run "$MAW_BIN" doctor --fix
+  [ "$status" -eq 0 ]
+
+  local after_hash
+  after_hash="$(cat .maw/lockfile-hash)"
+  [ "$after_hash" != "$before_hash" ]
+  [ "$after_hash" = "$expected_hash" ]
+  [[ "$output" =~ "lockfile hash を更新しました" ]]
+  [[ "$output" =~ "yarn install" ]]
+}
+
 # ===== maw status =====
 
 @test "maw status はワークスペース一覧を表示する" {

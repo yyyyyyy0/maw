@@ -139,7 +139,7 @@ jobs:
 
       - name: Check workspace health
         run: |
-          health=$(maw doctor --json)
+          health=$(maw doctor --json || true)
           echo "$health"
 
           # サマリーをチェック
@@ -157,7 +157,7 @@ jobs:
 ```yaml
       - name: Check specific categories
         run: |
-          health=$(maw doctor --json)
+          health=$(maw doctor --json || true)
 
           # worktree ステータス
           worktree_status=$(echo "$health" | jq -r '.categories.worktree.status')
@@ -186,7 +186,7 @@ jobs:
       - name: Doctor with detailed output
         run: |
           # JSON と通常出力を両方取得
-          health=$(maw doctor --json)
+          health=$(maw doctor --json || true)
 
           # 失敗したチェックを抽出
           failed_checks=$(echo "$health" | jq -r '.checks[] | select(.status == "failed") | "- \(.name): \(.message)"')
@@ -204,7 +204,7 @@ jobs:
       - name: Report health status
         if: always()
         run: |
-          health=$(maw doctor --json)
+          health=$(maw doctor --json || true)
           score=$(echo "$health" | jq -r '.health_score')
           failed=$(echo "$health" | jq -r '.summary.failed')
           warnings=$(echo "$health" | jq -r '.summary.warnings')
@@ -222,6 +222,9 @@ jobs:
 ```
 
 ## jq での活用例
+
+GitHub Actions では JSON を parse する前に `health=$(maw doctor --json || true)` の形を推奨します。
+既定 shell は `bash -e` のため、failed issue があると `jq` 実行前に step が終了するためです。
 
 ### サマリー取得
 
@@ -337,7 +340,7 @@ test:
 
     - name: Pre-merge health check
       run: |
-        health=$(maw doctor --json)
+        health=$(maw doctor --json || true)
         failed=$(echo "$health" | jq -r '.summary.failed')
         if [[ "$failed" -gt 0 ]]; then
           echo "::error::Cannot merge with failed health checks"

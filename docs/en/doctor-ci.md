@@ -130,7 +130,7 @@ jobs:
 
       - name: Check workspace health
         run: |
-          health=$(maw doctor --json)
+          health=$(maw doctor --json || true)
           echo "$health"
 
           failed=$(echo "$health" | jq -r '.summary.failed')
@@ -145,7 +145,7 @@ jobs:
 ```yaml
       - name: Doctor with detailed output
         run: |
-          health=$(maw doctor --json)
+          health=$(maw doctor --json || true)
           failed_checks=$(echo "$health" | jq -r '.checks[] | select(.status == "failed") | "- \(.name): \(.message)"')
 
           if [[ -n "$failed_checks" ]]; then
@@ -156,6 +156,9 @@ jobs:
 ```
 
 ## jq Examples
+
+In GitHub Actions, prefer `health=$(maw doctor --json || true)` before parsing the JSON.
+The default shell uses `bash -e`, so a failed doctor check would otherwise abort the step before `jq` runs.
 
 ### Read summary
 
