@@ -254,6 +254,21 @@ validate_handover_bundle() {
       log_error "blocked_by オブジェクトに description が必要です（${invalid_count} 件が未設定）"
       return 1
     fi
+
+    # オブジェクト形式のエントリは resolved:boolean が必須
+    local missing_resolved_count
+    missing_resolved_count="$(jq '[.blocked_by[] | select(type == "object" and (has("resolved") | not))] | length' "$json_file" 2>/dev/null)" || missing_resolved_count=0
+    if [[ "$missing_resolved_count" -gt 0 ]]; then
+      log_error "blocked_by オブジェクトに resolved:boolean が必要です（${missing_resolved_count} 件が未設定）"
+      return 1
+    fi
+
+    local invalid_resolved_type_count
+    invalid_resolved_type_count="$(jq '[.blocked_by[] | select(type == "object" and has("resolved") and (.resolved | type != "boolean"))] | length' "$json_file" 2>/dev/null)" || invalid_resolved_type_count=0
+    if [[ "$invalid_resolved_type_count" -gt 0 ]]; then
+      log_error "blocked_by.resolved は boolean である必要があります（${invalid_resolved_type_count} 件が不正）"
+      return 1
+    fi
   fi
 
   # id フィールドの型チェック（存在する場合は文字列であること）
