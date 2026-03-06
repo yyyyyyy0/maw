@@ -328,7 +328,7 @@ handover JSON bundle を読み込んでセッション再開プロンプトを�
 ### 概要
 
 ```bash
-maw takeover [<name>] [--format md|json|prompt]
+maw takeover [<name>] [--format md|json|prompt|plan]
 ```
 
 ### 引数
@@ -348,14 +348,56 @@ maw takeover [<name>] [--format md|json|prompt]
 | モード | 説明 |
 |--------|------|
 | `prompt` | エージェント向けセッション再開プロンプト（構造化テキスト） |
-| `plan` | プラン情報を JSON 形式で出力（score, category, verification_status など）※ v0.6.0 以降 |
+| `plan` | downstream automation / CI が利用できる readiness 契約 JSON を出力 ※ v0.6.0 以降 |
 | `json` | JSON サイドカーをそのまま出力（`jq .` 整形済み） |
 | `md` | Markdown handover ファイルをそのまま出力 |
 
-### --format plan 出力例 (v0.6.0 以降)
+### --format plan 公開契約 (v0.6.0 以降)
+
+`plan` は公開 JSON 契約です。key 順は固定しませんが、以下の top-level key は必須です。
+
+| key | type | 説明 |
+|-----|------|------|
+| `id` | string | handover bundle にない場合は `""` |
+| `summary` | string | handover bundle にない場合は `""` |
+| `evidence_refs` | array<string> | handover bundle にない場合は `[]` |
+| `workspace` | string | ワークスペース名 |
+| `branch` | string | 対象ブランチ名 |
+| `verification_status` | string | 推奨値: `pending \| passed \| failed \| skipped`。未対応値も返却するが scoring では `unknown` と同等に 30 点相当で扱う |
+| `state` | string | 推奨値: `clean \| dirty \| stash`。未対応値も返却するが scoring では `unknown` と同等に 50 点相当で扱う |
+| `decisions_count` | integer >= 0 | decisions 件数 |
+| `risks_count` | integer >= 0 | risks 件数 |
+| `blockers_count` | integer >= 0 | `blocked_by` の総件数 |
+| `blockers` | array<string> | `blocked_by` を説明文へ正規化した配列。最大 3 件 |
+| `score` | integer | `0..100` |
+| `category` | string | `ready \| caution \| blocked` |
+| `priority_actions` | array<object> | 各要素は下記の最小契約を満たす |
+| `resume_commands` | array<string> | 再開時に使うコマンド候補 |
+
+### `priority_actions[*]` 最小契約
+
+各 action object は以下を required とします。追加フィールド（例: `commands`, `blocker_type`）は許容されます。
+
+| key | type | 説明 |
+|-----|------|------|
+| `priority_level` | `1 \| 2 \| 3` | `1` が最優先 |
+| `action` | string | 実行種別 |
+| `description` | string | 人が読む説明 |
+| `priority` | `low \| medium \| high` | 表示上の優先度 |
+
+### 後方互換
+
+- bundle に `id` / `summary` / `evidence_refs` がなくても plan 生成は成功し、既定値 `""`, `""`, `[]` を使います
+- `blocked_by` が v2 の文字列配列でも plan 生成は成功します
+- `blocked_by` が object/string 混在でも plan 生成は成功します
+
+### --format plan 出力例
 
 ```json
 {
+  "id": "ws-feature-auth-20260306",
+  "summary": "認証フローの確認待ち",
+  "evidence_refs": ["diff:HEAD~1"],
   "workspace": "feature-auth",
   "branch": "claude/feature-auth",
   "verification_status": "pending",
@@ -363,19 +405,31 @@ maw takeover [<name>] [--format md|json|prompt]
   "decisions_count": 2,
   "risks_count": 1,
   "blockers_count": 0,
+  "blockers": [],
   "score": 72,
   "category": "caution",
   "priority_actions": [
-    {"action": "review", "description": "注意点を確認してください", "priority": "medium"},
-    {"action": "verify", "description": "テストを実行してください", "priority": "medium"}
+    {
+      "priority_level": 2,
+      "action": "verify",
+      "description": "テストを実行してください",
+      "priority": "medium",
+      "commands": ["npm test", "npm run build"]
+    },
+    {
+      "priority_level": 3,
+      "action": "review",
+      "description": "注意点を確認してください",
+      "priority": "low"
+    }
   ],
   "resume_commands": ["npm test", "npm run build"]
 }
 ```
 
 **スコアリング基準**:
-- `verification_status` (40%): passed=100, skipped=50, pending=30, failed=0
-- `state` (20%): clean=100, stash=60, dirty=40
+- `verification_status` (40%): passed=100, skipped=50, pending=30, failed=0, unknown=30
+- `state` (20%): clean=100, stash=60, dirty=40, unknown=50
 - `blockers_count` (20%): 0=100, 1-2=50, 3+=0
 - `risks` (20%): 各リスクで減点 (low=5, medium=10, high=20, critical=40)
 
