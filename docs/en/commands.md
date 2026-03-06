@@ -328,7 +328,7 @@ Read a handover JSON bundle and print a session-resume prompt (v0.5.0+).
 ### Synopsis
 
 ```bash
-maw takeover [<name>] [--format md|json|prompt]
+maw takeover [<name>] [--format md|json|prompt|plan]
 ```
 
 ### Arguments
@@ -348,34 +348,88 @@ maw takeover [<name>] [--format md|json|prompt]
 | Mode | Description |
 |------|-------------|
 | `prompt` | Structured session-resume prompt for agents |
-| `plan` | Plan information as JSON (score, category, verification_status, etc.) — v0.6.0+ |
+| `plan` | Public readiness-contract JSON for downstream automation / CI — v0.6.0+ |
 | `json` | Raw JSON sidecar output (pretty-printed via `jq .`) |
 | `md` | Raw Markdown handover file output |
 
-### --format plan Output Example (v0.6.0+)
+### --format plan Public Contract (v0.6.0+)
+
+`plan` is a public JSON contract. Key order is not fixed, but the following top-level keys are required.
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `id` | string | Uses `""` when missing from the handover bundle |
+| `summary` | string | Uses `""` when missing from the handover bundle |
+| `evidence_refs` | array<string> | Uses `[]` when missing from the handover bundle |
+| `workspace` | string | Workspace name |
+| `branch` | string | Target branch name |
+| `verification_status` | string | Supported values: `pending \| passed \| failed \| skipped`. Unsupported values are still returned, but scoring treats them as `unknown` = 30 |
+| `state` | string | Supported values: `clean \| dirty \| stash`. Unsupported values are still returned, but scoring treats them as `unknown` = 50 |
+| `decisions_count` | integer >= 0 | Number of decisions |
+| `risks_count` | integer >= 0 | Number of risks |
+| `blockers_count` | integer >= 0 | Total number of `blocked_by` entries |
+| `blockers` | array<string> | `blocked_by` normalized to descriptions, capped at 3 items |
+| `score` | integer | `0..100` |
+| `category` | string | `ready \| caution \| blocked` |
+| `priority_actions` | array<object> | Each entry must satisfy the minimum contract below |
+| `resume_commands` | array<string> | Candidate commands to resume work |
+
+### `priority_actions[*]` Minimum Contract
+
+Each action object requires the following keys. Additional fields such as `commands` or `blocker_type` are allowed.
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `priority_level` | `1 \| 2 \| 3` | `1` is the highest priority |
+| `action` | string | Action kind |
+| `description` | string | Human-readable explanation |
+| `priority` | `low \| medium \| high` | Display priority |
+
+### Backward Compatibility
+
+- Plan generation still succeeds when `id` / `summary` / `evidence_refs` are missing, using defaults `""`, `""`, and `[]`
+- Plan generation still succeeds when `blocked_by` is a v2 string array
+- Plan generation still succeeds when `blocked_by` mixes strings and objects
+
+### --format plan Output Example
 
 ```json
 {
+  "id": "ws-feature-auth-20260306",
+  "summary": "Waiting on auth flow verification",
+  "evidence_refs": ["diff:HEAD~1"],
   "workspace": "feature-auth",
   "branch": "claude/feature-auth",
   "verification_status": "pending",
   "state": "clean",
   "decisions_count": 2,
-  "risks_count": 1,
+  "risks_count": 0,
   "blockers_count": 0,
+  "blockers": [],
   "score": 72,
   "category": "caution",
   "priority_actions": [
-    {"action": "review", "description": "Please review the considerations", "priority": "medium"},
-    {"action": "verify", "description": "Please run tests", "priority": "medium"}
+    {
+      "priority_level": 2,
+      "action": "verify",
+      "description": "Please run tests",
+      "priority": "medium",
+      "commands": ["npm test", "npm run build"]
+    },
+    {
+      "priority_level": 3,
+      "action": "review",
+      "description": "Please review the considerations",
+      "priority": "low"
+    }
   ],
   "resume_commands": ["npm test", "npm run build"]
 }
 ```
 
 **Scoring Criteria**:
-- `verification_status` (40%): passed=100, skipped=50, pending=30, failed=0
-- `state` (20%): clean=100, stash=60, dirty=40
+- `verification_status` (40%): passed=100, skipped=50, pending=30, failed=0, unknown=30
+- `state` (20%): clean=100, stash=60, dirty=40, unknown=50
 - `blockers_count` (20%): 0=100, 1-2=50, 3+=0
 - `risks` (20%): Deduct per risk (low=5, medium=10, high=20, critical=40)
 

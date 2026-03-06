@@ -37,7 +37,7 @@ jobs:
           git add . && git commit -m "initial"
 
           "$MAW_BIN" init
-          "$MAW_BIN" spawn test_ws --agent claude --issue 1
+          "$MAW_BIN" spawn test_ws --agent claude --issue 1 --from main
           "$MAW_BIN" handover --workspace test_ws
           "$MAW_BIN" takeover test_ws --format plan | jq '.workspace'
 
