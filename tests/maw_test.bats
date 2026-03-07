@@ -2020,6 +2020,61 @@ teardown() {
   [ "$status" -ne 0 ]
 }
 
+@test "validate_handover_bundle は evidence_refs 非配列を拒否する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  local json_file=".maw/handovers/ws-ws1.json"
+  jq '.evidence_refs = "diff:HEAD~1"' "$json_file" > "${json_file}.tmp" \
+    && mv "${json_file}.tmp" "$json_file"
+
+  run "$MAW_BIN" handover --validate ws1
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "evidence_refs" ]]
+}
+
+@test "validate_handover_bundle は evidence_refs の非文字列要素を拒否する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  local json_file=".maw/handovers/ws-ws1.json"
+  jq '.evidence_refs = ["diff:HEAD~1", 1]' "$json_file" > "${json_file}.tmp" \
+    && mv "${json_file}.tmp" "$json_file"
+
+  run "$MAW_BIN" handover --validate ws1
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "各要素は文字列" ]]
+}
+
+@test "validate_handover_bundle は evidence_refs の空文字要素を拒否する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  local json_file=".maw/handovers/ws-ws1.json"
+  jq '.evidence_refs = ["", "diff:HEAD~1"]' "$json_file" > "${json_file}.tmp" \
+    && mv "${json_file}.tmp" "$json_file"
+
+  run "$MAW_BIN" handover --validate ws1
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "空文字列" ]]
+}
+
+@test "validate_handover_bundle は未知 prefix の evidence_refs を後方互換で許容する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  local json_file=".maw/handovers/ws-ws1.json"
+  jq '.evidence_refs = ["custom:ticket-123"]' "$json_file" > "${json_file}.tmp" \
+    && mv "${json_file}.tmp" "$json_file"
+
+  run "$MAW_BIN" handover --validate ws1
+  [ "$status" -eq 0 ]
+}
+
 @test "maw migrate handover --to v3 --dry-run でプレビューが表示される（適用なし）" {
   "$MAW_BIN" init
   "$MAW_BIN" spawn ws1 --agent claude
@@ -2443,6 +2498,22 @@ teardown() {
   [ "$second" = "test:npm test" ]
 }
 
+@test "maw handover --evidence-ref は canonical refs を入力順で保持する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  run "$MAW_BIN" handover --workspace ws1 \
+    --evidence-ref "diff:HEAD~1" \
+    --evidence-ref "test:bats tests/maw_test.bats" \
+    --evidence-ref "doctor:json-multi" \
+    --evidence-ref "resume:bin/maw doctor --json"
+  [ "$status" -eq 0 ]
+
+  local actual
+  actual="$(jq -c '.evidence_refs' .maw/handovers/ws-ws1.json)"
+  [ "$actual" = '["diff:HEAD~1","test:bats tests/maw_test.bats","doctor:json-multi","resume:bin/maw doctor --json"]' ]
+}
+
 @test "maw takeover --format plan の出力に id/summary/evidence_refs が含まれる" {
   "$MAW_BIN" init
   "$MAW_BIN" spawn ws1 --agent claude
@@ -2461,6 +2532,24 @@ teardown() {
   [ "$id" != "null" ]
   [ "$summary" = "テスト中" ]
   [ "$er_len" -eq 1 ]
+}
+
+@test "maw takeover --format plan は evidence_refs を無加工かつ順序保持で返す" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+  "$MAW_BIN" handover --workspace ws1 \
+    --evidence-ref "diff:HEAD~1" \
+    --evidence-ref "test:bats tests/maw_test.bats" \
+    --evidence-ref "doctor:json-multi" \
+    --evidence-ref "resume:bin/maw doctor --json" \
+    --evidence-ref "custom:ticket-123"
+
+  local output actual
+  output="$("$MAW_BIN" takeover ws1 --format plan)"
+  actual="$(echo "$output" | jq -c '.evidence_refs')"
+
+  [ "$actual" = '["diff:HEAD~1","test:bats tests/maw_test.bats","doctor:json-multi","resume:bin/maw doctor --json","custom:ticket-123"]' ]
 }
 
 @test "maw takeover --format plan は id/summary/evidence_refs が欠けた bundle でも既定値で成功する" {

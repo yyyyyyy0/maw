@@ -260,6 +260,8 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
 | `--blocked-by-owner <name>` | Optional owner for the typed blocker entry |
 | `--unblock <text>` | Remove `blocked_by` entries by case-insensitive partial match |
 | `--clear-blockers` | Clear all `blocked_by` entries |
+| `--summary <text>` | Update the handover summary (1-3 sentences recommended) |
+| `--evidence-ref <ref>` | Add an evidence reference string (repeatable, example: `diff:HEAD~1`) |
 
 ### --scope Modes
 
@@ -287,6 +289,12 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
   "agent": "claude",
   "issue": "42",
   "summary": "Add JWT authentication",
+  "evidence_refs": [
+    "diff:HEAD~1",
+    "test:bats tests/maw_test.bats",
+    "doctor:json-multi",
+    "resume:bin/maw doctor --json"
+  ],
   "decisions": [
     {
       "topic": "Auth library",
@@ -344,6 +352,25 @@ Compatibility rules:
 - Normal handover generation still writes `version: 2`
 - `maw migrate handover --to v3` is the normalization path for converting legacy string blockers into typed object blockers and backfilling missing `resolved: false` on legacy object blockers, including pre-existing `version: 3` bundles
 
+### `evidence_refs` Minimal Contract
+
+`evidence_refs` is a public handover field for lightweight evidence pointers. Validated bundles require `evidence_refs` to be an array of non-empty strings. The minimal public vocabulary for downstream automation is the following prefix set:
+
+| Prefix | Meaning | Typical source |
+|--------|---------|----------------|
+| `diff:` | Diff or change evidence | `git diff`, commit range, patch reference |
+| `test:` | Test execution evidence | test command, log path, result label |
+| `doctor:` | `maw doctor` evidence | `maw doctor --json` mode or saved result |
+| `resume:` | Resume-command evidence | command reference for follow-up work |
+
+Payload rules:
+- The first `:` separates the prefix from the payload
+- For validated bundles, the payload after the first `:` should be non-empty
+- `takeover --format plan` returns `evidence_refs` exactly as recorded: original order preserved, no rewriting, no truncation
+- Missing `evidence_refs` still default to `[]` in `takeover --format plan`
+- Unknown prefixes remain valid for backward compatibility, but they are outside the minimal public contract and should not be depended on by external automation
+- `--resume-command` remains the primary field for executable resume commands and is not auto-copied into `evidence_refs`; add `--evidence-ref "resume:<cmd>"` explicitly when you want both
+
 ### Content Generated (Markdown)
 
 - Workspace info (branch, agent, issue)
@@ -394,7 +421,7 @@ maw takeover [<name>] [--format md|json|prompt|plan]
 |-----|------|-------|
 | `id` | string | Uses `""` when missing from the handover bundle |
 | `summary` | string | Uses `""` when missing from the handover bundle |
-| `evidence_refs` | array<string> | Uses `[]` when missing from the handover bundle |
+| `evidence_refs` | array<string> | Passed through as recorded, preserving order and contents; uses `[]` when missing from the handover bundle |
 | `workspace` | string | Workspace name |
 | `branch` | string | Target branch name |
 | `verification_status` | string | Supported values: `pending \| passed \| failed \| skipped`. Unsupported values are still returned, but scoring treats them as `unknown` = 30 |
@@ -431,6 +458,7 @@ Each action object requires the following keys. Additional fields such as `comma
 ### Backward Compatibility
 
 - Plan generation still succeeds when `id` / `summary` / `evidence_refs` are missing, using defaults `""`, `""`, and `[]`
+- Plan generation preserves `evidence_refs` as recorded and does not normalize unknown prefixes
 - Plan generation still succeeds when `blocked_by` is a v2 string array
 - Plan generation still succeeds when `blocked_by` mixes strings and objects
 - Plan generation still tolerates legacy object blockers without `resolved`, treating missing `resolved` as `false` on read
