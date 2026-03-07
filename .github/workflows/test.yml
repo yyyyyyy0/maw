@@ -33,6 +33,9 @@ jobs:
       - name: Run core bats tests
         run: bats tests/maw_test.bats
 
+      - name: Run CLI E2E bats tests
+        run: bats tests/e2e_test.bats
+
       - name: Run security bats tests
         run: bats tests/security_test.bats
 
