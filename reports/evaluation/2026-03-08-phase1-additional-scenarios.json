@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "generated_at": "2026-03-07T18:01:45Z",
+  "mode": "evaluation",
+  "scenarios": [
+    {
+      "id": "merge_conflict",
+      "passed": true,
+      "summary": "maw merge fails on conflicting same-line edits and leaves unmerged entries in the root repository.",
+      "evidence_refs": [
+        "cmd:maw merge ws1",
+        "git:git ls-files -u",
+        "log:merge_conflict/merge.log"
+      ],
+      "checks": {
+        "merge_exit_code": 1,
+        "unmerged_entries_count": 3,
+        "conflict_detected": true
+      }
+    },
+    {
+      "id": "ttl_expiry_doctor_fix",
+      "passed": true,
+      "summary": "Expired claims are detected, removed by maw doctor --fix, and followed by a clean doctor --json --exit-code-mode multi run.",
+      "evidence_refs": [
+        "cmd:maw claim src/auth.ts --workspace ws1 --ttl 0",
+        "cmd:maw doctor --json --exit-code-mode multi",
+        "cmd:maw doctor --fix",
+        "log:ttl_expiry_doctor_fix/doctor_before_fix.json",
+        "log:ttl_expiry_doctor_fix/doctor_fix.log"
+      ],
+      "checks": {
+        "expired_detected": true,
+        "claims_before_fix": 1,
+        "claims_after_fix": 0,
+        "doctor_before_fix_exit_code": 2,
+        "doctor_after_fix_exit_code": 0
+      }
+    },
+    {
+      "id": "takeover_format_matrix",
+      "passed": true,
+      "summary": "takeover succeeds for all formats on full bundles, while evidence-only bundles keep md working and fail json/prompt/plan because the JSON sidecar is absent.",
+      "evidence_refs": [
+        "cmd:maw handover --workspace ws1 --scope full",
+        "cmd:maw handover --workspace ws1 --scope evidence",
+        "log:takeover_format_matrix/full-*.out",
+        "log:takeover_format_matrix/evidence-*.err"
+      ],
+      "checks": {
+        "full_bundle": {
+          "md": 0,
+          "json": 0,
+          "prompt": 0,
+          "plan": 0
+        },
+        "evidence_only_bundle": {
+          "md": 0,
+          "json": 1,
+          "prompt": 1,
+          "plan": 1
+        }
+      }
+    }
+  ],
+  "notes": [
+    "Synthetic evaluation evidence for backlog A-004.",
+    "Scenarios are isolated in temporary repositories and summarize current CLI behavior in this workspace checkout."
+  ]
+}
