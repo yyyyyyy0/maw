@@ -254,7 +254,12 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
 | `--risk-severity <level>` | リスク重要度 (low\|medium\|high\|critical, デフォルト: medium) |
 | `--resume-command <cmd>` | resume_commands 配列に追加 |
 | `--verification-status <s>` | verification_status を更新 (pending\|passed\|failed\|skipped) |
-| `--blocked-by <text>` | blocked_by 配列に追加（作業をブロックする要因を記録） |
+| `--blocked-by <text>` | `blocked_by` に legacy string entry を追加（後方互換モード） |
+| `--blocked-by-type <type>` | typed blocker entry を追加 (`dependency\|issue\|blocker`) |
+| `--blocked-by-desc <text>` | typed blocker entry の description（`--blocked-by-type` と併用） |
+| `--blocked-by-owner <name>` | typed blocker entry の owner（省略可） |
+| `--unblock <text>` | `blocked_by` を大文字小文字無視の部分一致で削除 |
+| `--clear-blockers` | `blocked_by` をすべてクリア |
 
 ### --scope モード
 
@@ -295,7 +300,14 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
       "mitigation": "環境変数で設定可能にする"
     }
   ],
-  "blocked_by": ["外部 API の仕様確定"],
+  "blocked_by": [
+    {
+      "type": "dependency",
+      "description": "外部 API の仕様確定",
+      "resolved": false,
+      "owner": "platform-team"
+    }
+  ],
   "verification_status": "pending",
   "diff_stat": "...",
   "diff": "...（4096バイト上限）",
@@ -309,6 +321,28 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
 ```
 
 **state の値**: `clean`（変更なし）/ `dirty`（未コミット変更あり）/ `stash`（stash あり）
+
+### `blocked_by` 契約
+
+`blocked_by` は次の 2 形式を受け付けます。
+
+- legacy string entry: `"外部レビュー待ち"`
+- typed object entry: `{ "type": "...", "description": "...", "resolved": false, "owner": "..." }`
+
+新規 write の公開契約は typed object entry です。
+
+| key | type | 説明 |
+|-----|------|------|
+| `type` | `dependency \| issue \| blocker` | 必須 |
+| `description` | string | 必須、空文字不可 |
+| `resolved` | boolean | 必須 |
+| `owner` | string | 任意 |
+
+互換ルール:
+- `--blocked-by` は後方互換のため残しますが、新規 write は `--blocked-by-type` + `--blocked-by-desc` を推奨します
+- `maw handover --validate` は object entry に対して typed contract を検証します
+- 通常の handover 生成は引き続き `version: 2` を書き込みます
+- `maw migrate handover --to v3` は legacy string blocker の typed object blocker への正規化と、legacy object blocker の `resolved: false` 補完を行う経路であり、既存の `version: 3` bundle に対しても不足分を正規化します
 
 ### 生成内容（Markdown）
 
@@ -385,11 +419,21 @@ maw takeover [<name>] [--format md|json|prompt|plan]
 | `description` | string | 人が読む説明 |
 | `priority` | `low \| medium \| high` | 表示上の優先度 |
 
+### Typed blocker の優先アクション規約
+
+- `resolved = false` かつ `type = blocker` は `priority_level: 1` / `action: "unblock"` を生成します
+- `resolved = false` かつ `type = dependency` または `issue` は `priority_level: 2` / `action: "unblock"` を生成します
+- legacy string blocker は `blocker_type: "unknown"` の後方互換フォールバックとして `priority_level: 2` の `unblock` を生成します
+- `owner` がある場合、生成される `unblock` description に owner を含めます
+- `resolved = true` の typed blocker は `priority_actions` を生成しません
+- この契約固定では raw `blocked_by` / `blockers_count` / score 集計ロジックは変更しません
+
 ### 後方互換
 
 - bundle に `id` / `summary` / `evidence_refs` がなくても plan 生成は成功し、既定値 `""`, `""`, `[]` を使います
 - `blocked_by` が v2 の文字列配列でも plan 生成は成功します
 - `blocked_by` が object/string 混在でも plan 生成は成功します
+- legacy object blocker に `resolved` がなくても、read 時は `false` とみなして plan 生成を継続します
 
 ### --format plan 出力例
 
@@ -695,12 +739,13 @@ maw doctor [--fix] [--aggressive] [--json] [--exit-code-mode simple|multi]
 
 ## `maw migrate <json-file>`
 
-handover JSON を v1 から v2 に移行します。
+handover JSON を移行します。ファイルパス形式は後方互換のため残し、T3 では `maw migrate handover --to v3` を推奨します。
 
 ### 概要
 
 ```bash
 maw migrate <json-file>
+maw migrate handover --to v3 <workspace> [--dry-run|--apply]
 ```
 
 ### 引数
@@ -711,23 +756,34 @@ maw migrate <json-file>
 
 ### 動作
 
+#### legacy compatibility mode: `maw migrate <json-file>`
+
 1. JSON ファイルの version を確認
-2. version 1 の場合、version 2 に更新
-3. 以下のフィールドを追加（空配列/デフォルト値で初期化）:
-   - `decisions`: []
-   - `risks`: []
-   - `blocked_by`: []
-   - `resume_commands`: []
-   - `verification_status`: "pending"
+2. `version = 1` の場合、`version = 2` に更新
+3. legacy Phase 1 フィールド (`decisions`, `risks`, `blocked_by`, `resume_commands`, `verification_status`) を追加
 4. 元の JSON ファイルを上書き
+
+#### 推奨 T3 正規化モード: `maw migrate handover --to v3 <workspace>`
+
+1. `.maw/handovers/ws-<workspace>.json` を読む
+2. legacy string `blocked_by` を typed object blocker に変換する
+3. 変換した legacy string blocker と、`resolved` を持たない legacy object blocker に `resolved: false` を補完する
+4. `id`, `summary`, `evidence_refs` が欠けていれば補完する
+5. `version = 3` に更新する
+6. すでに正規化済みの bundle のみ skip し、`version: 3` であっても不足分があればその場で正規化する
+7. 既定では preview のみ表示し (`--dry-run`)、`--apply` で上書きする
 
 ### 使用例
 
 ```bash
-# handover JSON を v1 から v2 に移行
+# legacy v1 -> v2 ファイル移行
 maw migrate .maw/handovers/ws-feature-auth.json
 
-# 移行後の JSON を確認
+# 推奨 blocked_by 正規化 (v3)
+maw migrate handover --to v3 feature-auth --dry-run
+maw migrate handover --to v3 feature-auth --apply
+
+# 移行後の version / blockers を確認
 cat .maw/handovers/ws-feature-auth.json | jq '.version'
-# 出力: 2
+cat .maw/handovers/ws-feature-auth.json | jq '.blocked_by'
 ```

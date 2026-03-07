@@ -134,7 +134,7 @@ migrate_handover_v2_to_v3() {
   local version
   version="$(jq -r '.version // 1' "$json_file")"
 
-  if [[ "$version" -ge 3 ]]; then
+  if [[ "$version" -gt 3 ]]; then
     log_info "Already at version ${version}, v3 migration not needed."
     return 0
   fi
@@ -152,7 +152,11 @@ migrate_handover_v2_to_v3() {
   fi
 
   # v2 文字列 blocked_by → v3 object 形式に変換
+  # legacy object blocker の resolved を補完
   # id/summary/evidence_refs を補完
+  local original
+  original="$(cat "$json_file")"
+
   local converted
   converted="$(jq \
     --arg id "$id" \
@@ -162,6 +166,8 @@ migrate_handover_v2_to_v3() {
       .blocked_by[] |
       if type == "string" then
         {"type": "blocker", "description": ., "resolved": false}
+      elif type == "object" and (has("resolved") | not) then
+        . + {"resolved": false}
       else
         .
       end
@@ -170,6 +176,11 @@ migrate_handover_v2_to_v3() {
     if .summary == null then .summary = "" else . end |
     if .evidence_refs == null then .evidence_refs = [] else . end
   ' "$json_file")"
+
+  if [[ "$version" -ge 3 ]] && [[ "$converted" == "$original" ]]; then
+    log_info "Already at version ${version}, v3 migration not needed."
+    return 0
+  fi
 
   if [[ "$dry_run" == true ]]; then
     log_info "Dry-run: ${json_file} の変換プレビュー（blocked_by のみ表示）"

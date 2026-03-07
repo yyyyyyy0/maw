@@ -254,7 +254,12 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
 | `--risk-severity <level>` | Risk severity (low\|medium\|high\|critical, default: medium) |
 | `--resume-command <cmd>` | Add to resume_commands array |
 | `--verification-status <s>` | Update verification_status (pending\|passed\|failed\|skipped) |
-| `--blocked-by <text>` | Add to blocked_by array (record factors blocking work) |
+| `--blocked-by <text>` | Add a legacy string entry to `blocked_by` (backward-compat mode) |
+| `--blocked-by-type <type>` | Add a typed blocker entry (`dependency\|issue\|blocker`) |
+| `--blocked-by-desc <text>` | Description for the typed blocker entry (used with `--blocked-by-type`) |
+| `--blocked-by-owner <name>` | Optional owner for the typed blocker entry |
+| `--unblock <text>` | Remove `blocked_by` entries by case-insensitive partial match |
+| `--clear-blockers` | Clear all `blocked_by` entries |
 
 ### --scope Modes
 
@@ -295,7 +300,14 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
       "mitigation": "Make configurable via environment variables"
     }
   ],
-  "blocked_by": ["External API specification"],
+  "blocked_by": [
+    {
+      "type": "dependency",
+      "description": "External API specification",
+      "resolved": false,
+      "owner": "platform-team"
+    }
+  ],
   "verification_status": "pending",
   "diff_stat": "...",
   "diff": "... (4096 byte limit)",
@@ -309,6 +321,28 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
 ```
 
 **state values**: `clean` (no changes) / `dirty` (uncommitted changes) / `stash` (stash entries present)
+
+### `blocked_by` Contract
+
+`blocked_by` accepts either of the following entry types:
+
+- Legacy string entry: `"waiting for external review"`
+- Typed object entry: `{ "type": "...", "description": "...", "resolved": false, "owner": "..." }`
+
+Typed object entries are the public contract for new writes:
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `type` | `dependency \| issue \| blocker` | Required |
+| `description` | string | Required, non-empty |
+| `resolved` | boolean | Required |
+| `owner` | string | Optional |
+
+Compatibility rules:
+- `--blocked-by` remains available for backward compatibility, but new writes should prefer `--blocked-by-type` + `--blocked-by-desc`
+- `maw handover --validate` enforces the typed object contract for object entries
+- Normal handover generation still writes `version: 2`
+- `maw migrate handover --to v3` is the normalization path for converting legacy string blockers into typed object blockers and backfilling missing `resolved: false` on legacy object blockers, including pre-existing `version: 3` bundles
 
 ### Content Generated (Markdown)
 
@@ -385,11 +419,21 @@ Each action object requires the following keys. Additional fields such as `comma
 | `description` | string | Human-readable explanation |
 | `priority` | `low \| medium \| high` | Display priority |
 
+### Typed Blocker Action Rules
+
+- `resolved = false` and `type = blocker` generates a `priority_level: 1` / `action: "unblock"` entry
+- `resolved = false` and `type = dependency` or `issue` generates a `priority_level: 2` / `action: "unblock"` entry
+- Legacy string blockers generate a `priority_level: 2` `unblock` entry with `blocker_type: "unknown"`
+- When `owner` is present, the generated `unblock` description includes that owner
+- `resolved = true` typed blockers do not generate `priority_actions`
+- Raw `blocked_by`, `blockers_count`, and score aggregation are unchanged by this contract freeze
+
 ### Backward Compatibility
 
 - Plan generation still succeeds when `id` / `summary` / `evidence_refs` are missing, using defaults `""`, `""`, and `[]`
 - Plan generation still succeeds when `blocked_by` is a v2 string array
 - Plan generation still succeeds when `blocked_by` mixes strings and objects
+- Plan generation still tolerates legacy object blockers without `resolved`, treating missing `resolved` as `false` on read
 
 ### --format plan Output Example
 
@@ -695,12 +739,13 @@ The default mode is `simple`.
 
 ## `maw migrate <json-file>`
 
-Migrate handover JSON from v1 to v2.
+Migrate handover JSON. The legacy file-path form is kept for backward compatibility, and the preferred T3 flow is `maw migrate handover --to v3`.
 
 ### Synopsis
 
 ```bash
 maw migrate <json-file>
+maw migrate handover --to v3 <workspace> [--dry-run|--apply]
 ```
 
 ### Arguments
@@ -711,23 +756,34 @@ maw migrate <json-file>
 
 ### Operation
 
-1. Verify JSON file version
-2. If version 1, update to version 2
-3. Add the following fields (initialized with empty arrays/default values):
-   - `decisions`: []
-   - `risks`: []
-   - `blocked_by`: []
-   - `resume_commands`: []
-   - `verification_status`: "pending"
+#### Legacy compatibility mode: `maw migrate <json-file>`
+
+1. Verify the JSON file version
+2. If the file is `version = 1`, update it to `version = 2`
+3. Add the legacy Phase 1 fields (`decisions`, `risks`, `blocked_by`, `resume_commands`, `verification_status`)
 4. Overwrite the original JSON file
+
+#### Preferred T3 normalization mode: `maw migrate handover --to v3 <workspace>`
+
+1. Read `.maw/handovers/ws-<workspace>.json`
+2. Convert legacy string `blocked_by` entries into typed object blockers
+3. Backfill `resolved: false` on converted legacy string blockers and on legacy object blockers that do not have `resolved`
+4. Backfill `id`, `summary`, and `evidence_refs` when they are missing
+5. Set `version = 3`
+6. Skip only when the bundle is already normalized; otherwise normalize in place even if it is already `version: 3`
+7. Show a preview by default (`--dry-run`), or overwrite the file with `--apply`
 
 ### Examples
 
 ```bash
-# Migrate handover JSON from v1 to v2
+# Legacy v1 -> v2 file migration
 maw migrate .maw/handovers/ws-feature-auth.json
 
-# Verify the migrated version
+# Preferred blocked_by normalization to v3
+maw migrate handover --to v3 feature-auth --dry-run
+maw migrate handover --to v3 feature-auth --apply
+
+# Verify the migrated version / blockers
 cat .maw/handovers/ws-feature-auth.json | jq '.version'
-# Output: 2
+cat .maw/handovers/ws-feature-auth.json | jq '.blocked_by'
 ```
