@@ -305,6 +305,20 @@ validate_handover_bundle() {
       log_error "evidence_refs フィールドは配列である必要があります"
       return 1
     fi
+
+    local invalid_er_type_count
+    invalid_er_type_count="$(jq '[.evidence_refs[] | select(type != "string")] | length' "$json_file" 2>/dev/null)" || invalid_er_type_count=0
+    if [[ "$invalid_er_type_count" -gt 0 ]]; then
+      log_error "evidence_refs の各要素は文字列である必要があります（${invalid_er_type_count} 件が不正）"
+      return 1
+    fi
+
+    local empty_er_count
+    empty_er_count="$(jq '[.evidence_refs[] | select(type == "string" and . == "")] | length' "$json_file" 2>/dev/null)" || empty_er_count=0
+    if [[ "$empty_er_count" -gt 0 ]]; then
+      log_error "evidence_refs の各要素は空文字列を許可しません（${empty_er_count} 件が不正）"
+      return 1
+    fi
   fi
 
   return 0

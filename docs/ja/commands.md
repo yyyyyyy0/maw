@@ -260,6 +260,8 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
 | `--blocked-by-owner <name>` | typed blocker entry の owner（省略可） |
 | `--unblock <text>` | `blocked_by` を大文字小文字無視の部分一致で削除 |
 | `--clear-blockers` | `blocked_by` をすべてクリア |
+| `--summary <text>` | handover summary を更新（1-3文推奨） |
+| `--evidence-ref <ref>` | evidence 参照文字列を追加（複数指定可、例: `diff:HEAD~1`） |
 
 ### --scope モード
 
@@ -287,6 +289,12 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
   "agent": "claude",
   "issue": "42",
   "summary": "Add JWT authentication",
+  "evidence_refs": [
+    "diff:HEAD~1",
+    "test:bats tests/maw_test.bats",
+    "doctor:json-multi",
+    "resume:bin/maw doctor --json"
+  ],
   "decisions": [
     {
       "topic": "Auth library",
@@ -344,6 +352,25 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
 - 通常の handover 生成は引き続き `version: 2` を書き込みます
 - `maw migrate handover --to v3` は legacy string blocker の typed object blocker への正規化と、legacy object blocker の `resolved: false` 補完を行う経路であり、既存の `version: 3` bundle に対しても不足分を正規化します
 
+### `evidence_refs` 最小契約
+
+`evidence_refs` は軽量な証拠参照を保持する公開 handover field です。validate を通る bundle では、`evidence_refs` は「非空文字列だけからなる配列」である必要があります。downstream automation が依存してよい最小語彙は次の prefix 集合です。
+
+| Prefix | 意味 | 典型的な出所 |
+|--------|------|--------------|
+| `diff:` | 差分・変更証拠 | `git diff`、commit range、patch 参照 |
+| `test:` | テスト実行証拠 | テストコマンド、ログパス、結果ラベル |
+| `doctor:` | `maw doctor` 証拠 | `maw doctor --json` の mode や保存結果 |
+| `resume:` | 再開コマンド証拠 | 後続作業用コマンド参照 |
+
+payload ルール:
+- 最初の `:` で prefix と payload を区切ります
+- validate を通る bundle では、最初の `:` 以降の payload は非空であるべきです
+- `takeover --format plan` は `evidence_refs` を記録順のまま返し、書き換えも切り詰めもしません
+- `evidence_refs` が欠けている場合でも `takeover --format plan` では `[]` を返します
+- 未知 prefix も後方互換のため有効ですが、最小公開契約には含めません。外部 automation は依存しないでください
+- 実行可能な再開コマンドの primary field は引き続き `resume_commands` であり、`--resume-command` は `evidence_refs` に自動複製しません。両方に残したい場合だけ `--evidence-ref "resume:<cmd>"` を明示追加します
+
 ### 生成内容（Markdown）
 
 - ワークスペース情報（ブランチ・エージェント・Issue）
@@ -394,7 +421,7 @@ maw takeover [<name>] [--format md|json|prompt|plan]
 |-----|------|------|
 | `id` | string | handover bundle にない場合は `""` |
 | `summary` | string | handover bundle にない場合は `""` |
-| `evidence_refs` | array<string> | handover bundle にない場合は `[]` |
+| `evidence_refs` | array<string> | 記録された順序と内容をそのまま返し、handover bundle にない場合は `[]` |
 | `workspace` | string | ワークスペース名 |
 | `branch` | string | 対象ブランチ名 |
 | `verification_status` | string | 推奨値: `pending \| passed \| failed \| skipped`。未対応値も返却するが scoring では `unknown` と同等に 30 点相当で扱う |
@@ -431,6 +458,7 @@ maw takeover [<name>] [--format md|json|prompt|plan]
 ### 後方互換
 
 - bundle に `id` / `summary` / `evidence_refs` がなくても plan 生成は成功し、既定値 `""`, `""`, `[]` を使います
+- plan 生成は `evidence_refs` を記録どおり返し、未知 prefix の正規化は行いません
 - `blocked_by` が v2 の文字列配列でも plan 生成は成功します
 - `blocked_by` が object/string 混在でも plan 生成は成功します
 - legacy object blocker に `resolved` がなくても、read 時は `false` とみなして plan 生成を継続します
