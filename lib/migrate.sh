@@ -162,6 +162,8 @@ migrate_handover_v2_to_v3() {
       .blocked_by[] |
       if type == "string" then
         {"type": "blocker", "description": ., "resolved": false}
+      elif type == "object" and (has("resolved") | not) then
+        . + {"resolved": false}
       else
         .
       end
