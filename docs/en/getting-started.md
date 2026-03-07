@@ -2,8 +2,12 @@
 
 ## Overview
 
-maw (Multi-Agent Workspace) is a CLI tool for managing parallel workspaces when multiple AI agents work on the same repository.
-It leverages git worktrees to create isolated workspaces, providing file claim (exclusive lock) declaration, handover document generation, and branch merge management in a unified interface.
+maw (Multi-Agent Workspace) is a CLI for safe parallel work in a single repository. It uses `git worktree` underneath, but the main value is the operating contract on top of it.
+
+- `maw claim` prevents edit collisions before they become merge conflicts
+- `maw handover` writes a Markdown view plus a JSON bundle
+- `maw takeover --format plan` turns that bundle into `ready / caution / blocked` plus `priority_actions`
+- `maw doctor --json` provides a machine-readable health gate for CI and automation
 
 ## Prerequisites
 
@@ -24,7 +28,7 @@ Verify installation:
 
 ```bash
 maw --version
-# => maw version 0.5.1
+# => maw v0.9.0
 ```
 
 ## Step 1: Initialize Your Project
@@ -41,13 +45,12 @@ your-project/
 ├── .maw/
 │   ├── config.json       # Project configuration
 │   ├── state.json        # Workspace state
-│   ├── claims.json       # File exclusive claims
-│   └── handovers/        # Handover documents
-└── .maw-workspaces/      # worktree root
+│   ├── claims.json       # File claims
+│   └── handovers/        # Handover bundles
+└── .maw-workspaces/      # git worktree root
 ```
 
-The ecosystem (Node.js / Python / Rust / Go) is detected automatically.
-`.maw/` and `.maw-workspaces/` are added to `.gitignore` automatically.
+The ecosystem (Node.js / Python / Rust / Go) is detected automatically. `.maw/` and `.maw-workspaces/` are added to `.gitignore` for you.
 
 ## Step 2: Create a Workspace
 
@@ -58,172 +61,147 @@ maw spawn feature-auth
 # With agent name and issue number
 maw spawn feature-auth --agent claude --issue 42
 
-# With a specific base branch
+# With an explicit base branch
 maw spawn feature-auth --agent claude --from develop
 ```
 
-If `--from` is omitted, `maw spawn` fetches `origin/main` and uses the latest fetched commit as the base branch.
-If `origin/main` cannot be fetched or resolved, the command fails with no fallback to other branches.
+If `--from` is omitted, `maw spawn` fetches `origin/main` and uses the latest resolved commit as the base branch. If `origin/main` cannot be fetched or resolved, the command fails with no fallback.
 
-After creation, a worktree is available at `.maw-workspaces/feature-auth/`.
-For Node.js projects, `node_modules` is shared via symlink (saves disk space).
+The workspace lives at `.maw-workspaces/feature-auth/`. The worktree is the isolation mechanism; the contract workflow starts with the next steps.
 
-## Step 3: Check Current Status
+## Step 3: Check Status and Claim Files
 
 ```bash
 maw status
+maw claim src/auth.ts
 ```
 
-Example output:
+Always claim a shared path before editing it. That lets maw stop collisions before another agent touches the same file or directory.
 
-```
-=== Workspaces ===
-     NAME             BRANCH                    AGENT    ISSUE   CREATED
-  -----------------------------------------------------------------------
-  -> feature-auth     claude/feature-auth       claude   42      2026-02-24
-
-=== Claims ===
-  FILE                     WORKSPACE       AGENT    CLAIMED       EXPIRES
-  -----------------------------------------------------------------------
-  (none)
-```
-
-`->` indicates the workspace that corresponds to the current working directory.
-
-## Step 4: Claim Files Before Editing
-
-**Always** run `maw claim` before editing any file. This prevents conflicts with other agents.
+Claims can also use TTL:
 
 ```bash
-# Claim a file
-maw claim src/auth.ts
-
-# Claim a directory
-maw claim src/components/
-
-# Claim with TTL (expires in 90 minutes)
 maw claim src/auth.ts --ttl 90
 ```
 
-If another workspace already holds a claim, you get an error:
+## Step 4: Generate a Handover Bundle
 
-```
-✗ src/auth.ts is already claimed by feature-login (agent: claude)
-```
-
-## Step 5: Implement
-
-Work normally inside the workspace's worktree directory (`.maw-workspaces/feature-auth/`).
-
-When done with a file:
+First generate the baseline bundle:
 
 ```bash
-maw unclaim src/auth.ts  # release the claim
+maw handover --workspace feature-auth
 ```
 
-## Step 6: Generate a Handover Document
-
-After completing work, generate a handover document for the next agent or human:
+Then enrich it with the structured fields the next agent or automation run will need:
 
 ```bash
-maw handover
+maw handover --workspace feature-auth \
+  --summary "JWT migration is complete and waiting for verification." \
+  --verification-status pending \
+  --resume-command "bats tests/e2e_test.bats" \
+  --evidence-ref "diff:HEAD~1" \
+  --evidence-ref "test:bats tests/e2e_test.bats"
 ```
 
-This creates `.maw/handovers/ws-feature-auth.md` containing:
+Generated outputs:
 
-- Branch info, agent name, and issue number
-- Commit history (latest 20 entries)
-- Changed file list
-- Uncommitted changes
-- Claims state
-- Notes (free-form placeholder)
+- `.maw/handovers/ws-feature-auth.md`
+  - human-readable handover view
+- `.maw/handovers/ws-feature-auth.json`
+  - canonical bundle used by `takeover`, automation, and audits
 
-## Step 7: Resume Session (takeover)
+The JSON sidecar carries `summary`, `verification_status`, `resume_commands`, `evidence_refs`, `blocked_by`, `risks`, `decisions`, and the rest of the structured work state.
 
-When another agent takes over the work, load the handover bundle to generate a session resumption prompt:
+## Step 5: Read the Takeover Plan
+
+`maw takeover --format plan` converts the handover bundle into a deterministic resume plan.
 
 ```bash
-maw takeover feature-auth
+maw takeover feature-auth --format plan | jq '{workspace, category, score, blockers, priority_actions}'
 ```
 
-The generated prompt includes:
-- Branch info, agent name, issue number
-- Work status (clean/dirty/stash)
-- Active claims list
-- Commit history and changed files
-- next_steps (handover notes)
+Important fields:
 
-Format options:
+- `category`: `ready | caution | blocked`
+- `score`: readiness score from 0 to 100
+- `blockers`: up to 3 normalized blocker summaries
+- `priority_actions`: the next actions to take
+
+Supporting views:
+
 ```bash
-maw takeover feature-auth --format json   # View JSON
-maw takeover feature-auth --format md     # View Markdown
+maw takeover feature-auth --format json
+maw takeover feature-auth --format md
+maw takeover feature-auth --format prompt
 ```
 
-## Step 8: Merge the Branch
+Use `plan` and `json` as the contract-centered outputs. `md` and `prompt` are supporting projections for people and model prompts.
+
+## Step 6: Run the Doctor Health Gate
+
+For CI and automation, use `doctor --json` as the health contract:
 
 ```bash
-# Merge into main (with auto cleanup)
+maw doctor --json --exit-code-mode multi | jq '{health_score, summary, categories}'
+```
+
+`--exit-code-mode multi` means:
+
+- `0`: no issues
+- `2`: warnings only
+- `1`: failed issues present
+
+That makes it easy to distinguish warnings from blocking failures in automation.
+
+## Step 7: Merge the Workspace
+
+```bash
 maw merge feature-auth
+```
 
-# Specify target branch
+You can also use:
+
+```bash
 maw merge feature-auth --base develop
-
-# Keep workspace after merge
-maw merge feature-auth --no-cleanup
-
-# Dry run (preview only)
 maw merge feature-auth --dry-run
+maw merge feature-auth --no-cleanup
 ```
 
-After a successful merge, the workspace's claims are automatically deleted.
+Using `maw merge` keeps claims and workspace cleanup under maw control.
 
-## Step 9: Cleanup
-
-```bash
-maw cleanup feature-auth        # Remove a specific WS
-maw cleanup --merged            # Remove all merged workspaces
-maw cleanup --all               # Remove all workspaces
-maw cleanup --all --dry-run     # Preview what would be removed
-```
-
-## Health Check
+## Typical Daily Workflow
 
 ```bash
-maw doctor       # Detect issues
-maw doctor --fix # Auto-repair
-```
-
-doctor checks:
-
-- Orphaned worktrees (in state but no worktree on disk)
-- Broken symlinks
-- Lockfile changes (dependency drift)
-- Orphaned claims (WS deleted but claim remains)
-- Expired claims (TTL exceeded)
-
-## Typical Agent Workflow
-
-```bash
-# 1. Check current status
+# 1. Check current state
 maw status
 
-# 2. Create workspace (first time only)
+# 2. Create a workspace
 maw spawn my-feature --agent claude --issue 123
 
-# 3. Claim files before editing
+# 3. Claim the file before editing
 maw claim src/target-file.ts
 
 # 4. Implement...
 
-# 5. Generate handover
-maw handover
+# 5. Update the handover bundle
+maw handover --workspace my-feature
+maw handover --workspace my-feature \
+  --summary "API implementation is complete. Waiting for E2E verification." \
+  --verification-status pending \
+  --resume-command "bats tests/e2e_test.bats" \
+  --evidence-ref "diff:HEAD~1"
 
-# 6. Merge & cleanup
+# 6. Inspect the resume plan and health gate
+maw takeover my-feature --format plan
+maw doctor --json --exit-code-mode multi
+
+# 7. Merge
 maw merge my-feature
 ```
 
-## Next Steps
+## Next Documents
 
-- [Command Reference](commands.md) — Detailed options for all commands
-- [Configuration Reference](config.md) — config.json and settings
-- [Concepts](concepts.md) — WS / claim / handover design philosophy
+- [Command Reference](commands.md) — detailed CLI options and output contracts
+- [Configuration Reference](config.md) — `config.json` and project settings
+- [Concepts](concepts.md) — background on workspace / claim / handover
+- [Doctor CI Guide](doctor-ci.md) — using `maw doctor --json` in CI

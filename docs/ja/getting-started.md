@@ -2,8 +2,12 @@
 
 ## 概要
 
-maw (Multi-Agent Workspace) は、複数の AI エージェントが同一リポジトリで並列作業するための CLI ツールです。
-git worktree を活用して独立したワークスペースを作成し、ファイル排他宣言・引き継ぎドキュメント生成・ブランチマージを一元管理します。
+maw (Multi-Agent Workspace) は、複数の AI エージェントが同一リポジトリで安全に並列作業するための CLI です。`git worktree` を土台にしますが、価値の中心はその上にある運用契約です。
+
+- `maw claim` で編集衝突を事前に防ぐ
+- `maw handover` で Markdown + JSON bundle を残す
+- `maw takeover --format plan` で再開判断を `ready / caution / blocked` と `priority_actions` に正規化する
+- `maw doctor --json` で CI / automation が読める健全性ゲートを提供する
 
 ## 前提条件
 
@@ -24,7 +28,7 @@ git clone https://github.com/yyyyyyy0/maw.git ~/.maw-cli
 
 ```bash
 maw --version
-# => maw version 0.5.1
+# => maw v0.9.0
 ```
 
 ## ステップ 1: プロジェクトを初期化する
@@ -42,188 +46,162 @@ your-project/
 │   ├── config.json       # プロジェクト設定
 │   ├── state.json        # ワークスペース状態
 │   ├── claims.json       # ファイル排他宣言
-│   └── handovers/        # 引き継ぎドキュメント
-└── .maw-workspaces/      # worktree 配置先
+│   └── handovers/        # handover bundle
+└── .maw-workspaces/      # git worktree 配置先
 ```
 
-ecosystem（Node.js / Python / Rust / Go）は自動検出されます。
-`.gitignore` に `.maw/` と `.maw-workspaces/` が自動追加されます。
+ecosystem（Node.js / Python / Rust / Go）は自動検出されます。`.gitignore` には `.maw/` と `.maw-workspaces/` が自動追加されます。
 
 ## ステップ 2: ワークスペースを作成する
 
 ```bash
-# 基本的な作成
+# 基本
 maw spawn feature-auth
 
 # エージェント種別と Issue 番号を指定
 maw spawn feature-auth --agent claude --issue 42
 
-# 分岐元ブランチを指定
+# 分岐元ブランチを明示
 maw spawn feature-auth --agent claude --from develop
 ```
 
-`--from` を省略すると、`maw spawn` は `origin/main` を fetch して最新を分岐元として使用します。
-`origin/main` を fetch/resolve できない場合は失敗し、他ブランチへのフォールバックは行いません。
+`--from` を省略すると、`maw spawn` は `origin/main` を fetch して最新を分岐元として使います。`origin/main` を fetch/resolve できない場合は失敗し、他ブランチへはフォールバックしません。
 
-作成後、`.maw-workspaces/feature-auth/` に worktree が展開されます。
-Node.js プロジェクトでは `node_modules` が symlink で共有されます（ディスク節約）。
+作成後、作業実体は `.maw-workspaces/feature-auth/` に配置されます。`git worktree` は隔離手段であり、運用の主役はここから先の contract です。
 
-## ステップ 3: 現状を確認する
+## ステップ 3: 現状確認と claim
 
 ```bash
 maw status
+maw claim src/auth.ts
 ```
 
-出力例:
+ファイルを編集する前に **必ず** `maw claim` を実行します。これにより、他のエージェントが同じファイルや親ディレクトリを編集中なら事前に止められます。
 
-```
-=== Workspaces ===
-     NAME             BRANCH                    AGENT    ISSUE   CREATED
-  -----------------------------------------------------------------------
-  -> feature-auth     claude/feature-auth       claude   42      2026-02-24
-
-=== Claims ===
-  FILE                     WORKSPACE       AGENT    CLAIMED       EXPIRES
-  -----------------------------------------------------------------------
-  （なし）
-```
-
-`->` は現在の作業ディレクトリに対応するワークスペースです。
-
-## ステップ 4: ファイルを排他宣言する
-
-ファイルを編集する前に **必ず** `maw claim` で排他宣言します。これにより他のエージェントとの競合を防ぎます。
+TTL を付けることもできます:
 
 ```bash
-# ファイルを claim
-maw claim src/auth.ts
-
-# ディレクトリごと claim
-maw claim src/components/
-
-# TTL（有効期限）付きで claim（90 分後に自動失効）
 maw claim src/auth.ts --ttl 90
 ```
 
-他のワークスペースがすでに claim 済みの場合はエラーになります:
+## ステップ 4: handover bundle を生成する
 
-```
-✗ src/auth.ts は feature-login (agent: claude) が claim 済みです
-```
-
-## ステップ 5: 作業・実装
-
-ワークスペースの worktree ディレクトリ（`.maw-workspaces/feature-auth/`）内で通常どおり作業します。
-
-完了したら:
+まず baseline の handover bundle を生成します。
 
 ```bash
-maw unclaim src/auth.ts  # claim を解除
+maw handover --workspace feature-auth
 ```
 
-## ステップ 6: 引き継ぎドキュメントを生成する
-
-作業完了後、次のエージェントや人間への引き継ぎ情報を生成します:
+その後、次の再開に必要な structured fields を追記します。
 
 ```bash
-maw handover
+maw handover --workspace feature-auth \
+  --summary "JWT 移行は完了。検証待ち。" \
+  --verification-status pending \
+  --resume-command "bats tests/e2e_test.bats" \
+  --evidence-ref "diff:HEAD~1" \
+  --evidence-ref "test:bats tests/e2e_test.bats"
 ```
 
-`.maw/handovers/ws-feature-auth.md` が生成されます。内容:
+生成物:
 
-- ブランチ情報・エージェント・Issue 番号
-- コミット履歴（最新 20 件）
-- 変更ファイル一覧
-- 未コミット変更
-- claims 状態
-- 引き継ぎメモ（自由記述プレースホルダー）
+- `.maw/handovers/ws-feature-auth.md`
+  - 人間向けの handover view
+- `.maw/handovers/ws-feature-auth.json`
+  - `takeover` と automation が読む canonical bundle
 
-## ステップ 7: セッションを引き継ぐ（takeover）
+JSON bundle には `summary`, `verification_status`, `resume_commands`, `evidence_refs`, `blocked_by`, `risks`, `decisions` などが入り、こちらが再開判断の正本です。
 
-別のエージェントが作業を引き継ぐ場合、handover bundle を読み込んでセッション再開プロンプトを生成します:
+## ステップ 5: takeover plan を読む
+
+`maw takeover --format plan` は handover bundle を `ready / caution / blocked` の再開計画に変換します。
 
 ```bash
-maw takeover feature-auth
+maw takeover feature-auth --format plan | jq '{workspace, category, score, blockers, priority_actions}'
 ```
 
-出力されるプロンプトには以下が含まれます:
-- ブランチ情報・エージェント・Issue 番号
-- 作業状態（clean/dirty/stash）
-- アクティブな claims 一覧
-- コミット履歴・変更ファイル
-- next_steps（引き継ぎメモ）
+plan の主なフィールド:
 
-フォーマットオプション:
+- `category`: `ready | caution | blocked`
+- `score`: 0-100 の readiness score
+- `blockers`: 最大 3 件の blocker 要約
+- `priority_actions`: 次にやるべきアクション一覧
+
+補助ビュー:
+
 ```bash
-maw takeover feature-auth --format json   # JSON を確認
-maw takeover feature-auth --format md     # Markdown を確認
+maw takeover feature-auth --format json
+maw takeover feature-auth --format md
+maw takeover feature-auth --format prompt
 ```
 
-## ステップ 8: ブランチをマージする
+`md` / `prompt` は人間や LLM への補助表示、`plan` / `json` は contract-centered output と考えるのが基本です。
+
+## ステップ 6: doctor JSON で健全性を確認する
+
+CI や automation では `doctor --json` を health gate として使います。
 
 ```bash
-# main ブランチへマージ（自動 cleanup 付き）
+maw doctor --json --exit-code-mode multi | jq '{health_score, summary, categories}'
+```
+
+`--exit-code-mode multi` の exit code:
+
+- `0`: 問題なし
+- `2`: warning のみ
+- `1`: failed issue あり
+
+このモードを使うと、「警告だけを通知したい」「failed のときだけ止めたい」といった分岐を組みやすくなります。
+
+## ステップ 7: マージする
+
+```bash
 maw merge feature-auth
+```
 
-# マージ先ブランチを指定
+必要に応じて:
+
+```bash
 maw merge feature-auth --base develop
-
-# マージ後もワークスペースを残す
-maw merge feature-auth --no-cleanup
-
-# ドライラン（実際にはマージしない）
 maw merge feature-auth --dry-run
+maw merge feature-auth --no-cleanup
 ```
 
-マージ後、当該ワークスペースの claims が自動削除されます。
+`maw merge` を使うことで、claims と workspace lifecycle の後片付けが maw 管理下に保たれます。
 
-## ステップ 9: クリーンアップ
-
-```bash
-maw cleanup feature-auth        # 特定 WS を削除
-maw cleanup --merged            # マージ済み WS をすべて削除
-maw cleanup --all               # 全 WS を削除
-maw cleanup --all --dry-run     # 削除対象の確認のみ
-```
-
-## 環境チェック
-
-```bash
-maw doctor       # 問題を検出
-maw doctor --fix # 自動修復
-```
-
-doctor が確認する項目:
-
-- orphaned worktree（state に存在するが worktree がない）
-- orphaned symlink
-- lockfile の変更（依存関係の更新漏れ）
-- orphaned claim（ワークスペースが削除されたのに claim が残っている）
-- 期限切れ claim
-
-## 典型的なエージェントワークフロー
+## 典型的な daily workflow
 
 ```bash
 # 1. 状況確認
 maw status
 
-# 2. ワークスペース作成（初回のみ）
+# 2. ワークスペース作成
 maw spawn my-feature --agent claude --issue 123
 
-# 3. 編集前に claim
+# 3. claim
 maw claim src/target-file.ts
 
 # 4. 実装...
 
-# 5. 引き継ぎ
-maw handover
+# 5. handover bundle を更新
+maw handover --workspace my-feature
+maw handover --workspace my-feature \
+  --summary "API 実装は完了。E2E 待ち。" \
+  --verification-status pending \
+  --resume-command "bats tests/e2e_test.bats" \
+  --evidence-ref "diff:HEAD~1"
 
-# 6. マージ & cleanup
+# 6. 再開 plan と health gate を確認
+maw takeover my-feature --format plan
+maw doctor --json --exit-code-mode multi
+
+# 7. マージ
 maw merge my-feature
 ```
 
-## 次のステップ
+## 次のドキュメント
 
-- [コマンドリファレンス](commands.md) — 全コマンドの詳細オプション
-- [設定リファレンス](config.md) — config.json・設定ファイルの詳細
-- [設計思想](concepts.md) — WS / claim / handover の設計思想
+- [コマンドリファレンス](commands.md) — 全コマンドの詳細オプションと出力契約
+- [設定リファレンス](config.md) — config.json と設定ファイル
+- [設計思想](concepts.md) — Workspace / claim / handover の背景
+- [CI Integration](doctor-ci.md) — `maw doctor --json` を CI で使う方法

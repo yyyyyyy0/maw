@@ -1,26 +1,29 @@
 # maw
 
-**Multi-Agent Workspace manager** - lightweight parallel workspaces for AI coding agents
+**Repo-local coordination contract for parallel coding agents**
 
-マルチエージェント開発（Claude Code, Codex 等）で git worktree を活用し、並列作業を効率化する CLI ツールです。
+maw is a lightweight CLI for safe parallel coding operations in a single repository. It uses git worktrees underneath, but the value is the contract layer on top: `claim` for collision prevention, `handover` for canonical work-state bundles, `takeover` for deterministic resume plans, and `doctor --json` for machine-readable health gates.
 
-## 解決する課題
+マルチエージェント開発（Claude Code, Codex 等）で、並列作業の事故率を下げて再開可能性を上げるための CLI です。`git worktree` は実装手段であり、価値の中心は `claim` / `handover` / `takeover` / `doctor` が作る運用契約にあります。
 
-| 課題 | maw の解決策 |
+## What maw provides
+
+| Need | maw contract |
 |---|---|
-| ファイル競合 | `maw claim` で編集前に排他宣言・競合を事前防止 |
-| コンテキスト断絶 | `maw handover` で引き継ぎ bundle を生成、`maw takeover` でセッションを再開 |
-| ディスク消費 | `node_modules` 等を symlink で全 WS が共有 |
-| 管理が煩雑 | worktree のライフサイクルを統合管理 |
+| Prevent edit collisions before merge time | `maw claim` declares exclusive ownership on shared paths |
+| Preserve work state across sessions | `maw handover` writes a Markdown view plus a JSON bundle |
+| Resume work safely with machine-readable guidance | `maw takeover --format plan` returns `ready/caution/blocked`, score, blockers, and `priority_actions` |
+| Gate automation and CI on repo health | `maw doctor --json --exit-code-mode multi` returns a stable health contract |
+| Keep workspace lifecycle controlled | `maw spawn`, `maw merge`, and `maw cleanup` manage isolated workspaces |
 
-## インストール
+## Install
 
 ```bash
 git clone https://github.com/yyyyyyy0/maw.git ~/.maw-cli
 ~/.maw-cli/install.sh
 ```
 
-**必須ツール**: `git`, `jq`
+**Required tools**: `git`, `jq`
 
 ```bash
 # macOS
@@ -30,68 +33,112 @@ brew install jq
 sudo apt install jq
 ```
 
-## クイックスタート
+## Quick Start
 
 ```bash
-# プロジェクトを初期化
+# 1. Initialize the repository
 cd your-project
 maw init
 
-# ワークスペースを作成
+# 2. Create an isolated workspace from the latest origin/main
 maw spawn feature-auth --agent claude --issue 42
-# --from 未指定時は origin/main を fetch して分岐（取得/解決できない場合は失敗）
+# If --from is omitted, maw fetches origin/main and fails if it cannot resolve it.
 
-# 状況確認
+# 3. Check current state and claim the file before editing
 maw status
-
-# ファイルを排他宣言してから編集
 maw claim src/auth.ts
 
-# 引き継ぎ → セッション再開 → マージ → クリーンアップ
-maw handover
-maw takeover feature-auth
+# 4. Do the work, then create a handover bundle
+maw handover --workspace feature-auth
+maw handover --workspace feature-auth \
+  --summary "JWT migration is implemented and waiting for verification." \
+  --verification-status pending \
+  --resume-command "bats tests/e2e_test.bats" \
+  --evidence-ref "diff:HEAD~1" \
+  --evidence-ref "test:bats tests/e2e_test.bats"
+
+# 5. Read the machine-readable resume plan
+maw takeover feature-auth --format plan | jq '{workspace, category, score, priority_actions}'
+
+# 6. Run the health gate used by CI/automation
+maw doctor --json --exit-code-mode multi | jq '{health_score, summary}'
+
+# 7. Merge when the plan is ready and the repo is healthy
 maw merge feature-auth
 ```
 
-## コマンド一覧
+`maw handover` produces:
 
-| コマンド | 説明 |
-|---------|------|
-| `maw init` | プロジェクトを初期化 |
-| `maw spawn <name>` | ワークスペースを作成 |
-| `maw list` | ワークスペース一覧を表示 |
-| `maw status` | ワークスペース状況と claims を表示 |
-| `maw claim <path>` | ファイル/ディレクトリを排他宣言 |
-| `maw unclaim <path>` | 排他宣言を解除 |
-| `maw handover` | 引き継ぎ bundle を生成（Markdown + JSON） |
-| `maw takeover [<name>]` | handover bundle を読んでセッション再開プロンプトを出力 |
-| `maw merge <name>` | ブランチをマージ |
-| `maw cleanup` | ワークスペースを削除 |
-| `maw doctor` | 環境の整合性チェック |
+- `.maw/handovers/ws-<name>.md` for people
+- `.maw/handovers/ws-<name>.json` for `maw takeover`, automation, and audit trails
 
-## ドキュメント
+In practice, the JSON sidecar is the canonical handover bundle. Markdown is the human-readable projection.
 
-| ドキュメント | 説明 |
-|------------|------|
-| [クイックスタート（日本語）](docs/ja/getting-started.md) | インストールから基本ワークフローまで |
-| [コマンドリファレンス（日本語）](docs/ja/commands.md) | 全コマンドの詳細オプション |
-| [設定リファレンス（日本語）](docs/ja/config.md) | config.json・設定ファイルの詳細 |
-| [設計思想（日本語）](docs/ja/concepts.md) | WS / claim / handover の設計思想 |
-| [セキュリティ（日本語）](docs/ja/security.md) | 入力バリデーションとセキュリティ対策 |
-| [CI Integration (日本語)](docs/ja/doctor-ci.md) | CI パイプラインでの `maw doctor --json` の使用方法 |
-| [Quick Start (English)](docs/en/getting-started.md) | Installation and basic workflow |
-| [Command Reference (English)](docs/en/commands.md) | All commands with options |
-| [Configuration Reference (English)](docs/en/config.md) | config.json and settings |
-| [Concepts (English)](docs/en/concepts.md) | WS / claim / handover design |
+## Contract Surfaces
 
-## エージェント向け
+| Command | Primary role |
+|---|---|
+| `maw claim <path>` | Declare exclusive ownership before editing a shared file or directory |
+| `maw handover` | Generate and enrich the canonical work-state bundle |
+| `maw takeover [<name>] --format plan` | Produce a deterministic resume/readiness plan with `score`, `category`, `blockers`, and `priority_actions` |
+| `maw takeover [<name>] --format json` | Read the raw handover bundle for scripts and integrations |
+| `maw doctor --json --exit-code-mode multi` | Expose a versioned health contract for CI and automation |
+| `maw merge <name>` | Merge through maw so claims and workspace lifecycle stay consistent |
 
-maw を AI エージェントとして使用する場合:
+`takeover --format md` and `takeover --format prompt` remain useful supporting views, but `plan` and `json` are the contract-centered outputs for resume automation.
 
-- `SKILL.md` — maw を使うための Claude Code スキル定義（R-SKILL-SCHEMA-001 準拠）
-- `AGENTS.md` — コアオペレーティングルール
-- `AGENTS.extensions.md` — maw Workspace ルール（R-MAW-*）
+## Command Overview
 
-## ライセンス
+| Command | Description |
+|---------|-------------|
+| `maw init` | Initialize `.maw/`, workspace state, and claim storage |
+| `maw spawn <name>` | Create an isolated workspace from `origin/main` or `--from` |
+| `maw list` | Show every managed workspace |
+| `maw status` | Show workspaces and active claims in one view |
+| `maw claim <path>` | Claim a file or directory before editing |
+| `maw unclaim <path>` | Release a claim when the path is no longer actively edited |
+| `maw handover` | Generate or update a Markdown + JSON handover bundle |
+| `maw takeover [<name>]` | Read a handover bundle as `md`, `json`, `prompt`, or `plan` |
+| `maw doctor` | Run repo health checks, including JSON output for CI gates |
+| `maw merge <name>` | Merge a workspace branch through maw-managed cleanup |
+| `maw cleanup` | Remove workspaces and stale maw-managed artifacts |
+
+## Documentation
+
+| Document | Description |
+|------------|-------------|
+| [Quick Start (Japanese)](docs/ja/getting-started.md) | Contract-first setup and daily workflow |
+| [Quick Start (English)](docs/en/getting-started.md) | Contract-first setup and daily workflow |
+| [Command Reference (Japanese)](docs/ja/commands.md) | Full CLI options and output contracts |
+| [Command Reference (English)](docs/en/commands.md) | Full CLI options and output contracts |
+| [Doctor CI Guide (Japanese)](docs/ja/doctor-ci.md) | Using `maw doctor --json` as a CI gate |
+| [Doctor CI Guide (English)](docs/en/doctor-ci.md) | Using `maw doctor --json` as a CI gate |
+| [Configuration Reference (Japanese)](docs/ja/config.md) | `config.json` and project settings |
+| [Configuration Reference (English)](docs/en/config.md) | `config.json` and project settings |
+| [Concepts (Japanese)](docs/ja/concepts.md) | Workspace / claim / handover design ideas |
+| [Concepts (English)](docs/en/concepts.md) | Workspace / claim / handover design ideas |
+
+## For Agents
+
+When maw is used by an AI coding agent:
+
+- `SKILL.md` defines the maw workflow for agents
+- `AGENTS.md` defines the core operating rules
+- `AGENTS.extensions.md` defines maw-specific workspace rules
+
+The intended loop is:
+
+```bash
+maw status
+maw spawn <name> --agent <agent> --issue <n>
+maw claim <path>
+# implement
+maw handover
+maw takeover <name> --format plan
+maw doctor --json --exit-code-mode multi
+maw merge <name>
+```
+
+## License
 
 MIT
