@@ -2085,6 +2085,32 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+@test "maw migrate handover --to v3 --apply は legacy v3 object blocker にも resolved=false を補完する" {
+  "$MAW_BIN" init
+  "$MAW_BIN" spawn ws1 --agent claude
+  "$MAW_BIN" handover --workspace ws1
+
+  local json_file=".maw/handovers/ws-ws1.json"
+  jq '.version = 3 | .blocked_by = [{"type": "blocker", "description": "legacy v3 object blocker"}]' \
+    "$json_file" > "${json_file}.tmp" && mv "${json_file}.tmp" "$json_file"
+
+  "$MAW_BIN" migrate handover --to v3 ws1 --apply
+
+  local version bl_type bl_desc bl_resolved
+  version="$(jq -r '.version' "$json_file")"
+  bl_type="$(jq -r '.blocked_by[0].type' "$json_file")"
+  bl_desc="$(jq -r '.blocked_by[0].description' "$json_file")"
+  bl_resolved="$(jq -r '.blocked_by[0].resolved' "$json_file")"
+
+  [ "$version" = "3" ]
+  [ "$bl_type" = "blocker" ]
+  [ "$bl_desc" = "legacy v3 object blocker" ]
+  [ "$bl_resolved" = "false" ]
+
+  run "$MAW_BIN" handover --validate ws1
+  [ "$status" -eq 0 ]
+}
+
 @test "maw migrate handover --to v3 --apply 後も takeover --format plan が動作する" {
   "$MAW_BIN" init
   "$MAW_BIN" spawn ws1 --agent claude
@@ -2100,14 +2126,14 @@ teardown() {
   [ "$blockers_count" -eq 1 ]
 }
 
-@test "maw migrate handover --to v3 は既存の v3 ファイルをスキップする" {
+@test "maw migrate handover --to v3 は正規化済みの v3 ファイルをスキップする" {
   "$MAW_BIN" init
   "$MAW_BIN" spawn ws1 --agent claude
   "$MAW_BIN" handover --workspace ws1
 
-  # v3 に手動設定
   local json_file=".maw/handovers/ws-ws1.json"
-  jq '.version = 3' "$json_file" > "${json_file}.tmp" && mv "${json_file}.tmp" "$json_file"
+  jq '.version = 3 | .blocked_by = [{"type": "blocker", "description": "normalized blocker", "resolved": false}] | .summary = "" | .evidence_refs = []' \
+    "$json_file" > "${json_file}.tmp" && mv "${json_file}.tmp" "$json_file"
 
   run "$MAW_BIN" migrate handover --to v3 ws1 --apply
   [ "$status" -eq 0 ]

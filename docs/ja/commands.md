@@ -342,7 +342,7 @@ maw handover [--workspace <name>] [--scope full|summary|evidence] [--validate <n
 - `--blocked-by` は後方互換のため残しますが、新規 write は `--blocked-by-type` + `--blocked-by-desc` を推奨します
 - `maw handover --validate` は object entry に対して typed contract を検証します
 - 通常の handover 生成は引き続き `version: 2` を書き込みます
-- `maw migrate handover --to v3` は legacy string blocker の typed object blocker への正規化と、legacy object blocker の `resolved: false` 補完を行う経路です
+- `maw migrate handover --to v3` は legacy string blocker の typed object blocker への正規化と、legacy object blocker の `resolved: false` 補完を行う経路であり、既存の `version: 3` bundle に対しても不足分を正規化します
 
 ### 生成内容（Markdown）
 
@@ -770,7 +770,8 @@ maw migrate handover --to v3 <workspace> [--dry-run|--apply]
 3. 変換した legacy string blocker と、`resolved` を持たない legacy object blocker に `resolved: false` を補完する
 4. `id`, `summary`, `evidence_refs` が欠けていれば補完する
 5. `version = 3` に更新する
-6. 既定では preview のみ表示し (`--dry-run`)、`--apply` で上書きする
+6. すでに正規化済みの bundle のみ skip し、`version: 3` であっても不足分があればその場で正規化する
+7. 既定では preview のみ表示し (`--dry-run`)、`--apply` で上書きする
 
 ### 使用例
 

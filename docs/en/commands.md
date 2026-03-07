@@ -342,7 +342,7 @@ Compatibility rules:
 - `--blocked-by` remains available for backward compatibility, but new writes should prefer `--blocked-by-type` + `--blocked-by-desc`
 - `maw handover --validate` enforces the typed object contract for object entries
 - Normal handover generation still writes `version: 2`
-- `maw migrate handover --to v3` is the normalization path for converting legacy string blockers into typed object blockers and backfilling missing `resolved: false` on legacy object blockers
+- `maw migrate handover --to v3` is the normalization path for converting legacy string blockers into typed object blockers and backfilling missing `resolved: false` on legacy object blockers, including pre-existing `version: 3` bundles
 
 ### Content Generated (Markdown)
 
@@ -770,7 +770,8 @@ maw migrate handover --to v3 <workspace> [--dry-run|--apply]
 3. Backfill `resolved: false` on converted legacy string blockers and on legacy object blockers that do not have `resolved`
 4. Backfill `id`, `summary`, and `evidence_refs` when they are missing
 5. Set `version = 3`
-6. Show a preview by default (`--dry-run`), or overwrite the file with `--apply`
+6. Skip only when the bundle is already normalized; otherwise normalize in place even if it is already `version: 3`
+7. Show a preview by default (`--dry-run`), or overwrite the file with `--apply`
 
 ### Examples
 
