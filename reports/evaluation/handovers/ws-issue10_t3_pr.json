@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "workspace": "issue10_t3_pr",
+  "branch": "worker/issue-10-issue10_t3_pr",
+  "agent": "worker",
+  "state": "clean",
+  "summary": "T3: froze the typed blocked_by contract in commands docs, validate_handover_bundle, and regression tests while keeping legacy read compatibility.",
+  "evidence_refs": [
+    "test:bats tests/maw_test.bats --filter blocked_by|takeover --format plan|handover --validate|migrate handover",
+    "test:bats tests/maw_test.bats --filter validate_handover_bundle|resolved",
+    "test:bats tests/maw_test.bats"
+  ],
+  "verification_status": "passed",
+  "blocked_by": []
+}
