@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-03-08T13:39:21Z",
+  "generated_at": "2026-03-12T04:59:08Z",
   "mode": "handover_samples",
   "samples": [
     {
@@ -9,7 +9,7 @@
       "summary": "Issue 10 T2 docs: fixed the public doctor --json contract in commands and CI docs, including a new English doctor-ci guide",
       "evidence_refs_count": 4,
       "verification_status": "skipped",
-      "source_ref": ".maw/handovers/ws-issue10_t2_docs.json"
+      "source_ref": "reports/evaluation/handovers/ws-issue10_t2_docs.json"
     },
     {
       "id": "ws-issue10_t3_pr",
@@ -17,7 +17,7 @@
       "summary": "T3: froze the typed blocked_by contract in commands docs, validate_handover_bundle, and regression tests while keeping legacy read compatibility.",
       "evidence_refs_count": 3,
       "verification_status": "passed",
-      "source_ref": ".maw/handovers/ws-issue10_t3_pr.json"
+      "source_ref": "reports/evaluation/handovers/ws-issue10_t3_pr.json"
     },
     {
       "id": "ws-issue10_t6_pr",
@@ -25,7 +25,7 @@
       "summary": "Phase1 proxy metrics script added and PR #18 opened; direct script smoke checks passed, but bats stalled in bats-preprocess in this shell.",
       "evidence_refs_count": 3,
       "verification_status": "skipped",
-      "source_ref": ".maw/handovers/ws-issue10_t6_pr.json"
+      "source_ref": "reports/evaluation/handovers/ws-issue10_t6_pr.json"
     }
   ],
   "notes": [

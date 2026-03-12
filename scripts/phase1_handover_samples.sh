@@ -6,6 +6,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 OUTPUT_DATE="$(date +"%Y-%m-%d")"
 OUTPUT_DIR="${REPO_ROOT}/reports/evaluation"
+SOURCE_DIR=""
+SOURCE_REF_PREFIX=""
 
 SAMPLE_FILES=(
   "ws-issue10_t2_docs.json"
@@ -15,13 +17,14 @@ SAMPLE_FILES=(
 
 usage() {
   cat <<'EOF'
-Usage: phase1_handover_samples.sh [--output-dir <dir>] [--date <YYYY-MM-DD>]
+Usage: phase1_handover_samples.sh [--output-dir <dir>] [--date <YYYY-MM-DD>] [--source-dir <dir>]
 
 Promote operational handover JSON samples into tracked evaluation artifacts.
 
 Options:
   --output-dir <dir>   Directory for generated evaluation artifacts (default: reports/evaluation)
   --date <YYYY-MM-DD>  Override artifact filename date (default: current local date)
+  --source-dir <dir>   Directory containing source handover JSON files
   -h, --help           Show this help
 EOF
 }
@@ -59,6 +62,14 @@ parse_args() {
         OUTPUT_DATE="$2"
         shift 2
         ;;
+      --source-dir)
+        [[ $# -ge 2 ]] || {
+          echo "--source-dir requires a value" >&2
+          exit 1
+        }
+        SOURCE_DIR="$2"
+        shift 2
+        ;;
       -h|--help)
         usage
         exit 0
@@ -77,12 +88,33 @@ fail() {
   exit 1
 }
 
-find_handover_source_dir() {
+resolve_source_dir() {
+  if [[ -n "${SOURCE_DIR}" ]]; then
+    [[ -d "${SOURCE_DIR}" ]] || fail "source dir not found: ${SOURCE_DIR}"
+    case "${SOURCE_DIR}" in
+      "${REPO_ROOT}"/*)
+        SOURCE_REF_PREFIX="${SOURCE_DIR#${REPO_ROOT}/}"
+        ;;
+      *)
+        SOURCE_REF_PREFIX="$(basename "$(dirname "${SOURCE_DIR}")")/$(basename "${SOURCE_DIR}")"
+        ;;
+    esac
+    return 0
+  fi
+
+  local tracked_source_dir="${REPO_ROOT}/reports/evaluation/handovers"
+  if [[ -d "${tracked_source_dir}" ]]; then
+    SOURCE_DIR="${tracked_source_dir}"
+    SOURCE_REF_PREFIX="reports/evaluation/handovers"
+    return 0
+  fi
+
   local candidate="${REPO_ROOT}"
 
   while [[ "${candidate}" != "/" ]]; do
     if [[ -d "${candidate}/.maw/handovers" ]]; then
-      printf '%s\n' "${candidate}/.maw/handovers"
+      SOURCE_DIR="${candidate}/.maw/handovers"
+      SOURCE_REF_PREFIX=".maw/handovers"
       return 0
     fi
     candidate="$(dirname "${candidate}")"
@@ -97,13 +129,22 @@ validate_source_handover() {
 
   jq -e '
     type == "object" and
+    (.version | type == "number") and
+    (.branch | type == "string") and
+    (.branch != "") and
+    (.agent | type == "string") and
+    (.agent != "") and
+    (.state | type == "string") and
+    (.state != "") and
     (.summary | type == "string") and
     (.summary != "") and
     (.evidence_refs | type == "array") and
     ((.evidence_refs | length) >= 1) and
+    all(.evidence_refs[]; type == "string") and
     (.workspace | type == "string") and
     (.workspace != "") and
-    (.verification_status | type == "string")
+    (.verification_status | type == "string") and
+    (.blocked_by | type == "array")
   ' "${json_file}" >/dev/null 2>&1 || fail "invalid handover sample: ${rel_ref}"
 }
 
@@ -132,9 +173,11 @@ copy_sample_files() {
 
   for sample in "${SAMPLE_FILES[@]}"; do
     local source_file="${source_dir}/${sample}"
+    local tmp_file="${target_dir}/${sample}.tmp"
     [[ -f "${source_file}" ]] || fail "missing handover sample: ${source_file}"
-    validate_source_handover "${source_file}" ".maw/handovers/${sample}"
-    project_tracked_handover "${source_file}" > "${target_dir}/${sample}"
+    validate_source_handover "${source_file}" "${SOURCE_REF_PREFIX}/${sample}"
+    project_tracked_handover "${source_file}" > "${tmp_file}"
+    mv "${tmp_file}" "${target_dir}/${sample}"
   done
 }
 
@@ -156,23 +199,21 @@ build_summary_json() {
     verification_status="$(jq -r '.verification_status' "${tracked_file}")"
 
     sample_entries="$(
-      jq -n \
+      jq \
         --arg id "${sample%.json}" \
         --arg workspace "${workspace}" \
         --arg summary "${summary}" \
         --argjson evidence_refs_count "${evidence_refs_count}" \
         --arg verification_status "${verification_status}" \
-        --arg source_ref ".maw/handovers/${sample}" \
-        --argjson current "${sample_entries}" \
-        '$current + [{
+        --arg source_ref "${SOURCE_REF_PREFIX}/${sample}" \
+        '. + [{
           id: $id,
           workspace: $workspace,
           summary: $summary,
           evidence_refs_count: $evidence_refs_count,
           verification_status: $verification_status,
           source_ref: $source_ref
-        }]' \
-        
+        }]' <<<"${sample_entries}"
     )"
   done
 
@@ -231,7 +272,8 @@ main() {
   local summary_json_path
   local summary_md_path
 
-  source_dir="$(find_handover_source_dir)"
+  resolve_source_dir
+  source_dir="${SOURCE_DIR}"
   handover_output_dir="${OUTPUT_DIR}/handovers"
   summary_json_path="${OUTPUT_DIR}/${OUTPUT_DATE}-handover-samples.json"
   summary_md_path="${OUTPUT_DIR}/${OUTPUT_DATE}-handover-samples.md"
