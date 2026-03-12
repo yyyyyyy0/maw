@@ -111,6 +111,26 @@ handover_samples_tracked_copies_lock_projected_schema() { # @test
   [ "$status" -eq 0 ]
 }
 
+handover_samples_preserves_full_relative_source_ref() { # @test
+  local relative_json_file
+  local relative_output_dir
+  relative_json_file="${SAMPLE_TMPDIR}/handover-samples-relative.json"
+  relative_output_dir="${SAMPLE_TMPDIR}/reports-relative"
+
+  run bash -lc 'cd "$1" && "$2" --source-dir reports/evaluation/handovers --output-dir "$3" --date 2026-03-08 > "$4"' _ \
+    "${ROOT_DIR}" "${SAMPLE_SCRIPT}" "${relative_output_dir}" "${relative_json_file}"
+  [ "$status" -eq 0 ]
+
+  run jq -e '
+    [.samples[].source_ref] == [
+      "reports/evaluation/handovers/ws-issue10_t2_docs.json",
+      "reports/evaluation/handovers/ws-issue10_t3_pr.json",
+      "reports/evaluation/handovers/ws-issue10_t6_pr.json"
+    ]
+  ' "${relative_json_file}"
+  [ "$status" -eq 0 ]
+}
+
 handover_samples_matches_checked_in_reports() { # @test
   run jq -S 'del(.generated_at)' "${SAMPLE_OUTPUT_DIR}/2026-03-08-handover-samples.json"
   [ "$status" -eq 0 ]

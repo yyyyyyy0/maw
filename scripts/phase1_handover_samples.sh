@@ -90,6 +90,10 @@ fail() {
 
 resolve_source_dir() {
   if [[ -n "${SOURCE_DIR}" ]]; then
+    case "${SOURCE_DIR}" in
+      /*) ;;
+      *) SOURCE_DIR="${REPO_ROOT}/${SOURCE_DIR}" ;;
+    esac
     [[ -d "${SOURCE_DIR}" ]] || fail "source dir not found: ${SOURCE_DIR}"
     case "${SOURCE_DIR}" in
       "${REPO_ROOT}"/*)
