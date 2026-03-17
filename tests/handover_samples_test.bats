@@ -131,6 +131,35 @@ handover_samples_preserves_full_relative_source_ref() { # @test
   [ "$status" -eq 0 ]
 }
 
+handover_samples_prefers_operational_root_over_tracked_fixtures() { # @test
+  local temp_repo
+  local temp_output_dir
+  local temp_json
+
+  temp_repo="${SAMPLE_TMPDIR}/precedence-repo"
+  temp_output_dir="${SAMPLE_TMPDIR}/precedence-output"
+  temp_json="${SAMPLE_TMPDIR}/precedence.json"
+
+  mkdir -p "${temp_repo}/scripts" "${temp_repo}/reports/evaluation/handovers" "${temp_repo}/.maw/handovers"
+  cp "${SAMPLE_SCRIPT}" "${temp_repo}/scripts/phase1_handover_samples.sh"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${temp_repo}/reports/evaluation/handovers/"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${temp_repo}/.maw/handovers/"
+
+  jq '.summary = "OPERATIONS-FIRST SAMPLE"' \
+    "${temp_repo}/.maw/handovers/ws-issue10_t2_docs.json" > "${temp_repo}/.maw/handovers/ws-issue10_t2_docs.json.tmp"
+  mv "${temp_repo}/.maw/handovers/ws-issue10_t2_docs.json.tmp" "${temp_repo}/.maw/handovers/ws-issue10_t2_docs.json"
+
+  run bash -lc 'cd "$1" && "$2" --output-dir "$3" --date 2026-03-08 > "$4"' _ \
+    "${temp_repo}" "${temp_repo}/scripts/phase1_handover_samples.sh" "${temp_output_dir}" "${temp_json}"
+  [ "$status" -eq 0 ]
+
+  run jq -e '
+    [.samples[] | select(.workspace == "issue10_t2_docs") | .summary] == ["OPERATIONS-FIRST SAMPLE"] and
+    [.samples[] | select(.workspace == "issue10_t2_docs") | .source_ref] == [".maw/handovers/ws-issue10_t2_docs.json"]
+  ' "${temp_json}"
+  [ "$status" -eq 0 ]
+}
+
 handover_samples_matches_checked_in_reports() { # @test
   run jq -S 'del(.generated_at)' "${SAMPLE_OUTPUT_DIR}/2026-03-08-handover-samples.json"
   [ "$status" -eq 0 ]

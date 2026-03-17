@@ -106,13 +106,6 @@ resolve_source_dir() {
     return 0
   fi
 
-  local tracked_source_dir="${REPO_ROOT}/reports/evaluation/handovers"
-  if [[ -d "${tracked_source_dir}" ]]; then
-    SOURCE_DIR="${tracked_source_dir}"
-    SOURCE_REF_PREFIX="reports/evaluation/handovers"
-    return 0
-  fi
-
   local candidate="${REPO_ROOT}"
 
   while [[ "${candidate}" != "/" ]]; do
@@ -123,6 +116,13 @@ resolve_source_dir() {
     fi
     candidate="$(dirname "${candidate}")"
   done
+
+  local tracked_source_dir="${REPO_ROOT}/reports/evaluation/handovers"
+  if [[ -d "${tracked_source_dir}" ]]; then
+    SOURCE_DIR="${tracked_source_dir}"
+    SOURCE_REF_PREFIX="reports/evaluation/handovers"
+    return 0
+  fi
 
   fail "could not locate .maw/handovers from ${REPO_ROOT}"
 }
