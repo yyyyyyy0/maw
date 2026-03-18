@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+source "${REPO_ROOT}/lib/core.sh"
+source "${REPO_ROOT}/lib/validate.sh"
 
 OUTPUT_DATE="$(date +"%Y-%m-%d")"
 OUTPUT_DIR="${REPO_ROOT}/reports/evaluation"
@@ -31,7 +33,7 @@ EOF
 
 require_tools() {
   local tool=""
-  for tool in jq cp mkdir; do
+  for tool in jq cp mkdir mktemp; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
       echo "missing required tool: ${tool}" >&2
       exit 1
@@ -127,6 +129,8 @@ validate_source_handover() {
   local json_file="$1"
   local rel_ref="$2"
 
+  validate_handover_bundle "${json_file}" >/dev/null 2>&1 || fail "invalid handover sample: ${rel_ref}"
+
   jq -e '
     type == "object" and
     (.version | type == "number") and
@@ -144,7 +148,7 @@ validate_source_handover() {
     (.workspace | type == "string") and
     (.workspace != "") and
     (.verification_status | type == "string") and
-    (.blocked_by | type == "array")
+    (.verification_status != "")
   ' "${json_file}" >/dev/null 2>&1 || fail "invalid handover sample: ${rel_ref}"
 }
 
@@ -167,18 +171,25 @@ project_tracked_handover() {
 copy_sample_files() {
   local source_dir="$1"
   local target_dir="$2"
+  local target_parent_dir
+  local staging_dir
   local sample=""
 
-  mkdir -p "${target_dir}"
+  target_parent_dir="$(dirname "${target_dir}")"
+  mkdir -p "${target_parent_dir}"
+  staging_dir="$(mktemp -d "${target_parent_dir}/handovers.tmp.XXXXXX")"
 
   for sample in "${SAMPLE_FILES[@]}"; do
     local source_file="${source_dir}/${sample}"
-    local tmp_file="${target_dir}/${sample}.tmp"
+    local tmp_file="${staging_dir}/${sample}.tmp"
     [[ -f "${source_file}" ]] || fail "missing handover sample: ${source_file}"
     validate_source_handover "${source_file}" "${SOURCE_REF_PREFIX}/${sample}"
     project_tracked_handover "${source_file}" > "${tmp_file}"
-    mv "${tmp_file}" "${target_dir}/${sample}"
+    mv "${tmp_file}" "${staging_dir}/${sample}"
   done
+
+  rm -rf "${target_dir}"
+  mv "${staging_dir}" "${target_dir}"
 }
 
 build_summary_json() {

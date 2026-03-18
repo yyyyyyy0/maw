@@ -140,8 +140,9 @@ handover_samples_prefers_operational_root_over_tracked_fixtures() { # @test
   temp_output_dir="${SAMPLE_TMPDIR}/precedence-output"
   temp_json="${SAMPLE_TMPDIR}/precedence.json"
 
-  mkdir -p "${temp_repo}/scripts" "${temp_repo}/reports/evaluation/handovers" "${temp_repo}/.maw/handovers"
+  mkdir -p "${temp_repo}/scripts" "${temp_repo}/lib" "${temp_repo}/reports/evaluation/handovers" "${temp_repo}/.maw/handovers"
   cp "${SAMPLE_SCRIPT}" "${temp_repo}/scripts/phase1_handover_samples.sh"
+  cp "${ROOT_DIR}/lib/core.sh" "${ROOT_DIR}/lib/validate.sh" "${temp_repo}/lib/"
   cp "${SOURCE_FIXTURE_DIR}/"*.json "${temp_repo}/reports/evaluation/handovers/"
   cp "${SOURCE_FIXTURE_DIR}/"*.json "${temp_repo}/.maw/handovers/"
 
@@ -171,8 +172,9 @@ handover_samples_ignores_parent_maw_when_repo_root_has_no_operational_samples() 
   temp_output_dir="${SAMPLE_TMPDIR}/fallback-output"
   temp_json="${SAMPLE_TMPDIR}/fallback.json"
 
-  mkdir -p "${parent_dir}/.maw/handovers" "${temp_repo}/scripts" "${temp_repo}/reports/evaluation/handovers"
+  mkdir -p "${parent_dir}/.maw/handovers" "${temp_repo}/scripts" "${temp_repo}/lib" "${temp_repo}/reports/evaluation/handovers"
   cp "${SAMPLE_SCRIPT}" "${temp_repo}/scripts/phase1_handover_samples.sh"
+  cp "${ROOT_DIR}/lib/core.sh" "${ROOT_DIR}/lib/validate.sh" "${temp_repo}/lib/"
   cp "${SOURCE_FIXTURE_DIR}/"*.json "${temp_repo}/reports/evaluation/handovers/"
   cp "${SOURCE_FIXTURE_DIR}/ws-issue10_t2_docs.json" "${parent_dir}/.maw/handovers/ws-issue10_t2_docs.json"
 
@@ -205,6 +207,49 @@ handover_samples_rejects_empty_evidence_refs_entries() { # @test
   run "${SAMPLE_SCRIPT}" --source-dir "${invalid_source_dir}" --output-dir "${SAMPLE_TMPDIR}/invalid-output" --date "2026-03-08"
   [ "$status" -ne 0 ]
   [[ "${output}" == *"invalid handover sample"* ]]
+}
+
+handover_samples_rejects_noncanonical_handover_fields() { # @test
+  local invalid_source_dir
+
+  invalid_source_dir="${SAMPLE_TMPDIR}/invalid-canonical-source"
+  mkdir -p "${invalid_source_dir}"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${invalid_source_dir}/"
+
+  jq '.verification_status = "done" | .blocked_by = [{"type":"dependency","description":"missing resolved"}]' \
+    "${invalid_source_dir}/ws-issue10_t2_docs.json" > "${invalid_source_dir}/ws-issue10_t2_docs.json.tmp"
+  mv "${invalid_source_dir}/ws-issue10_t2_docs.json.tmp" "${invalid_source_dir}/ws-issue10_t2_docs.json"
+
+  run "${SAMPLE_SCRIPT}" --source-dir "${invalid_source_dir}" --output-dir "${SAMPLE_TMPDIR}/invalid-canonical-output" --date "2026-03-08"
+  [ "$status" -ne 0 ]
+  [[ "${output}" == *"invalid handover sample"* ]]
+}
+
+handover_samples_does_not_partially_overwrite_outputs_on_invalid_source() { # @test
+  local invalid_source_dir
+  local stable_output_dir
+
+  invalid_source_dir="${SAMPLE_TMPDIR}/partial-invalid-source"
+  stable_output_dir="${SAMPLE_TMPDIR}/partial-output"
+  mkdir -p "${invalid_source_dir}"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${invalid_source_dir}/"
+
+  "${SAMPLE_SCRIPT}" --source-dir "${SOURCE_FIXTURE_DIR}" --output-dir "${stable_output_dir}" --date "2026-03-08" > /dev/null
+
+  jq '.summary = "SHOULD NOT LAND"' \
+    "${invalid_source_dir}/ws-issue10_t2_docs.json" > "${invalid_source_dir}/ws-issue10_t2_docs.json.tmp"
+  mv "${invalid_source_dir}/ws-issue10_t2_docs.json.tmp" "${invalid_source_dir}/ws-issue10_t2_docs.json"
+  jq '.summary = ""' \
+    "${invalid_source_dir}/ws-issue10_t3_pr.json" > "${invalid_source_dir}/ws-issue10_t3_pr.json.tmp"
+  mv "${invalid_source_dir}/ws-issue10_t3_pr.json.tmp" "${invalid_source_dir}/ws-issue10_t3_pr.json"
+
+  run "${SAMPLE_SCRIPT}" --source-dir "${invalid_source_dir}" --output-dir "${stable_output_dir}" --date "2026-03-08"
+  [ "$status" -ne 0 ]
+  [[ "${output}" == *"invalid handover sample"* ]]
+
+  run jq -r '.summary' "${stable_output_dir}/handovers/ws-issue10_t2_docs.json"
+  [ "$status" -eq 0 ]
+  [ "${output}" = "Issue 10 T2 docs: fixed the public doctor --json contract in commands and CI docs, including a new English doctor-ci guide" ]
 }
 
 handover_samples_matches_checked_in_reports() { # @test
