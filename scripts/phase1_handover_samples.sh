@@ -106,16 +106,12 @@ resolve_source_dir() {
     return 0
   fi
 
-  local candidate="${REPO_ROOT}"
-
-  while [[ "${candidate}" != "/" ]]; do
-    if [[ -d "${candidate}/.maw/handovers" ]]; then
-      SOURCE_DIR="${candidate}/.maw/handovers"
-      SOURCE_REF_PREFIX=".maw/handovers"
-      return 0
-    fi
-    candidate="$(dirname "${candidate}")"
-  done
+  local operational_source_dir="${REPO_ROOT}/.maw/handovers"
+  if [[ -d "${operational_source_dir}" ]]; then
+    SOURCE_DIR="${operational_source_dir}"
+    SOURCE_REF_PREFIX=".maw/handovers"
+    return 0
+  fi
 
   local tracked_source_dir="${REPO_ROOT}/reports/evaluation/handovers"
   if [[ -d "${tracked_source_dir}" ]]; then
@@ -144,7 +140,7 @@ validate_source_handover() {
     (.summary != "") and
     (.evidence_refs | type == "array") and
     ((.evidence_refs | length) >= 1) and
-    all(.evidence_refs[]; type == "string") and
+    all(.evidence_refs[]; type == "string" and . != "") and
     (.workspace | type == "string") and
     (.workspace != "") and
     (.verification_status | type == "string") and

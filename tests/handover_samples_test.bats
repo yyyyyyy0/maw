@@ -160,6 +160,53 @@ handover_samples_prefers_operational_root_over_tracked_fixtures() { # @test
   [ "$status" -eq 0 ]
 }
 
+handover_samples_ignores_parent_maw_when_repo_root_has_no_operational_samples() { # @test
+  local parent_dir
+  local temp_repo
+  local temp_output_dir
+  local temp_json
+
+  parent_dir="${SAMPLE_TMPDIR}/outer"
+  temp_repo="${parent_dir}/repo"
+  temp_output_dir="${SAMPLE_TMPDIR}/fallback-output"
+  temp_json="${SAMPLE_TMPDIR}/fallback.json"
+
+  mkdir -p "${parent_dir}/.maw/handovers" "${temp_repo}/scripts" "${temp_repo}/reports/evaluation/handovers"
+  cp "${SAMPLE_SCRIPT}" "${temp_repo}/scripts/phase1_handover_samples.sh"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${temp_repo}/reports/evaluation/handovers/"
+  cp "${SOURCE_FIXTURE_DIR}/ws-issue10_t2_docs.json" "${parent_dir}/.maw/handovers/ws-issue10_t2_docs.json"
+
+  jq '.summary = "UNRELATED PARENT SAMPLE"' \
+    "${parent_dir}/.maw/handovers/ws-issue10_t2_docs.json" > "${parent_dir}/.maw/handovers/ws-issue10_t2_docs.json.tmp"
+  mv "${parent_dir}/.maw/handovers/ws-issue10_t2_docs.json.tmp" "${parent_dir}/.maw/handovers/ws-issue10_t2_docs.json"
+
+  run bash -lc 'cd "$1" && "$2" --output-dir "$3" --date 2026-03-08 > "$4"' _ \
+    "${temp_repo}" "${temp_repo}/scripts/phase1_handover_samples.sh" "${temp_output_dir}" "${temp_json}"
+  [ "$status" -eq 0 ]
+
+  run jq -e '
+    [.samples[] | select(.workspace == "issue10_t2_docs") | .summary] == ["Issue 10 T2 docs: fixed the public doctor --json contract in commands and CI docs, including a new English doctor-ci guide"] and
+    [.samples[] | select(.workspace == "issue10_t2_docs") | .source_ref] == ["reports/evaluation/handovers/ws-issue10_t2_docs.json"]
+  ' "${temp_json}"
+  [ "$status" -eq 0 ]
+}
+
+handover_samples_rejects_empty_evidence_refs_entries() { # @test
+  local invalid_source_dir
+
+  invalid_source_dir="${SAMPLE_TMPDIR}/invalid-source"
+  mkdir -p "${invalid_source_dir}"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${invalid_source_dir}/"
+
+  jq '.evidence_refs = [""]' \
+    "${invalid_source_dir}/ws-issue10_t2_docs.json" > "${invalid_source_dir}/ws-issue10_t2_docs.json.tmp"
+  mv "${invalid_source_dir}/ws-issue10_t2_docs.json.tmp" "${invalid_source_dir}/ws-issue10_t2_docs.json"
+
+  run "${SAMPLE_SCRIPT}" --source-dir "${invalid_source_dir}" --output-dir "${SAMPLE_TMPDIR}/invalid-output" --date "2026-03-08"
+  [ "$status" -ne 0 ]
+  [[ "${output}" == *"invalid handover sample"* ]]
+}
+
 handover_samples_matches_checked_in_reports() { # @test
   run jq -S 'del(.generated_at)' "${SAMPLE_OUTPUT_DIR}/2026-03-08-handover-samples.json"
   [ "$status" -eq 0 ]
