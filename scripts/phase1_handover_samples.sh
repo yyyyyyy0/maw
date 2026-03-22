@@ -90,6 +90,15 @@ fail() {
   exit 1
 }
 
+dir_has_all_samples() {
+  local dir="$1"
+  local sample=""
+  for sample in "${SAMPLE_FILES[@]}"; do
+    [[ -f "${dir}/${sample}" ]] || return 1
+  done
+  return 0
+}
+
 resolve_source_dir() {
   if [[ -n "${SOURCE_DIR}" ]]; then
     case "${SOURCE_DIR}" in
@@ -109,14 +118,14 @@ resolve_source_dir() {
   fi
 
   local operational_source_dir="${REPO_ROOT}/.maw/handovers"
-  if [[ -d "${operational_source_dir}" ]]; then
+  if [[ -d "${operational_source_dir}" ]] && dir_has_all_samples "${operational_source_dir}"; then
     SOURCE_DIR="${operational_source_dir}"
     SOURCE_REF_PREFIX=".maw/handovers"
     return 0
   fi
 
   local tracked_source_dir="${REPO_ROOT}/reports/evaluation/handovers"
-  if [[ -d "${tracked_source_dir}" ]]; then
+  if [[ -d "${tracked_source_dir}" ]] && dir_has_all_samples "${tracked_source_dir}"; then
     SOURCE_DIR="${tracked_source_dir}"
     SOURCE_REF_PREFIX="reports/evaluation/handovers"
     return 0

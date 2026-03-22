@@ -420,3 +420,28 @@ handover_samples_preserves_unrelated_files_in_output_dir() { # @test
   [ "$(cat "${preserve_output_dir}/handovers/README.md")" = "keep me" ]
   [ -f "${preserve_output_dir}/handovers/ws-issue10_t2_docs.json" ]
 }
+
+handover_samples_falls_back_when_operational_dir_lacks_samples() { # @test
+  local temp_repo
+  local temp_output_dir
+  local temp_json
+
+  temp_repo="${SAMPLE_TMPDIR}/fallback-empty-maw"
+  temp_output_dir="${SAMPLE_TMPDIR}/fallback-empty-output"
+  temp_json="${SAMPLE_TMPDIR}/fallback-empty.json"
+
+  mkdir -p "${temp_repo}/scripts" "${temp_repo}/lib" "${temp_repo}/reports/evaluation/handovers" "${temp_repo}/.maw/handovers"
+  cp "${SAMPLE_SCRIPT}" "${temp_repo}/scripts/phase1_handover_samples.sh"
+  cp "${ROOT_DIR}/lib/core.sh" "${ROOT_DIR}/lib/validate.sh" "${temp_repo}/lib/"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${temp_repo}/reports/evaluation/handovers/"
+  # .maw/handovers exists but is empty — should fall back to reports/evaluation/handovers
+
+  run bash -lc 'cd "$1" && "$2" --output-dir "$3" --date 2026-03-08 > "$4"' _ \
+    "${temp_repo}" "${temp_repo}/scripts/phase1_handover_samples.sh" "${temp_output_dir}" "${temp_json}"
+  [ "$status" -eq 0 ]
+
+  run jq -e '
+    [.samples[0].source_ref] == ["reports/evaluation/handovers/ws-issue10_t2_docs.json"]
+  ' "${temp_json}"
+  [ "$status" -eq 0 ]
+}
