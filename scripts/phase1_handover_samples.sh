@@ -164,7 +164,7 @@ project_tracked_handover() {
     summary,
     evidence_refs,
     verification_status,
-    blocked_by
+    blocked_by: (.blocked_by // [])
   }' "${json_file}"
 }
 

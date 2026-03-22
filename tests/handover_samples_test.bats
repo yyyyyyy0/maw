@@ -301,3 +301,23 @@ handover_samples_rejects_workspace_mismatch() { # @test
   [ "$status" -ne 0 ]
   [[ "${output}" == *"workspace mismatch"* ]]
 }
+
+handover_samples_defaults_missing_blocked_by_to_empty_array() { # @test
+  local no_blocked_by_dir
+  local no_blocked_by_output
+
+  no_blocked_by_dir="${SAMPLE_TMPDIR}/no-blocked-by-source"
+  no_blocked_by_output="${SAMPLE_TMPDIR}/no-blocked-by-output"
+  mkdir -p "${no_blocked_by_dir}"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${no_blocked_by_dir}/"
+
+  jq 'del(.blocked_by)' \
+    "${no_blocked_by_dir}/ws-issue10_t2_docs.json" > "${no_blocked_by_dir}/ws-issue10_t2_docs.json.tmp"
+  mv "${no_blocked_by_dir}/ws-issue10_t2_docs.json.tmp" "${no_blocked_by_dir}/ws-issue10_t2_docs.json"
+
+  run "${SAMPLE_SCRIPT}" --source-dir "${no_blocked_by_dir}" --output-dir "${no_blocked_by_output}" --date "2026-03-08"
+  [ "$status" -eq 0 ]
+
+  run jq -e '.blocked_by | type == "array" and length == 0' "${no_blocked_by_output}/handovers/ws-issue10_t2_docs.json"
+  [ "$status" -eq 0 ]
+}
