@@ -266,3 +266,38 @@ handover_samples_matches_checked_in_reports() { # @test
   run cmp -s "${SAMPLE_OUTPUT_DIR}/2026-03-08-handover-samples.md" "${TRACKED_MD_FILE}"
   [ "$status" -eq 0 ]
 }
+
+handover_samples_preserves_full_absolute_source_ref() { # @test
+  local abs_source_dir
+  local abs_output_dir
+  local abs_json_file
+
+  abs_source_dir="${SAMPLE_TMPDIR}/abs-source"
+  abs_output_dir="${SAMPLE_TMPDIR}/abs-output"
+  abs_json_file="${SAMPLE_TMPDIR}/abs-samples.json"
+
+  mkdir -p "${abs_source_dir}"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${abs_source_dir}/"
+
+  run "${SAMPLE_SCRIPT}" --source-dir "${abs_source_dir}" --output-dir "${abs_output_dir}" --date "2026-03-08"
+  [ "$status" -eq 0 ]
+
+  run jq -r '.samples[0].source_ref' "${abs_output_dir}/2026-03-08-handover-samples.json"
+  [ "$status" -eq 0 ]
+  [[ "${output}" == "${abs_source_dir}/ws-issue10_t2_docs.json" ]]
+}
+
+handover_samples_rejects_workspace_mismatch() { # @test
+  local mismatch_source_dir
+
+  mismatch_source_dir="${SAMPLE_TMPDIR}/mismatch-source"
+  mkdir -p "${mismatch_source_dir}"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${mismatch_source_dir}/"
+
+  # Copy t3 payload into t2 slot
+  cp "${SOURCE_FIXTURE_DIR}/ws-issue10_t3_pr.json" "${mismatch_source_dir}/ws-issue10_t2_docs.json"
+
+  run "${SAMPLE_SCRIPT}" --source-dir "${mismatch_source_dir}" --output-dir "${SAMPLE_TMPDIR}/mismatch-output" --date "2026-03-08"
+  [ "$status" -ne 0 ]
+  [[ "${output}" == *"workspace mismatch"* ]]
+}

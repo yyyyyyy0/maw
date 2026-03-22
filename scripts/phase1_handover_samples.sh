@@ -102,7 +102,7 @@ resolve_source_dir() {
         SOURCE_REF_PREFIX="${SOURCE_DIR#${REPO_ROOT}/}"
         ;;
       *)
-        SOURCE_REF_PREFIX="$(basename "$(dirname "${SOURCE_DIR}")")/$(basename "${SOURCE_DIR}")"
+        SOURCE_REF_PREFIX="${SOURCE_DIR}"
         ;;
     esac
     return 0
@@ -184,6 +184,14 @@ copy_sample_files() {
     local tmp_file="${staging_dir}/${sample}.tmp"
     [[ -f "${source_file}" ]] || fail "missing handover sample: ${source_file}"
     validate_source_handover "${source_file}" "${SOURCE_REF_PREFIX}/${sample}"
+    local expected_workspace="${sample#ws-}"
+    expected_workspace="${expected_workspace%.json}"
+    local actual_workspace
+    actual_workspace="$(jq -r '.workspace' "${source_file}")"
+    if [[ "${actual_workspace}" != "${expected_workspace}" ]]; then
+      rm -rf "${staging_dir}"
+      fail "workspace mismatch in ${sample}: expected '${expected_workspace}', got '${actual_workspace}'"
+    fi
     project_tracked_handover "${source_file}" > "${tmp_file}"
     mv "${tmp_file}" "${staging_dir}/${sample}"
   done
