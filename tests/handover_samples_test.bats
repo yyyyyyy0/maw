@@ -321,3 +321,55 @@ handover_samples_defaults_missing_blocked_by_to_empty_array() { # @test
   run jq -e '.blocked_by | type == "array" and length == 0' "${no_blocked_by_output}/handovers/ws-issue10_t2_docs.json"
   [ "$status" -eq 0 ]
 }
+
+handover_samples_resolves_relative_source_dir_from_cwd() { # @test
+  local cwd_source_dir
+  local cwd_output_dir
+  local cwd_json_file
+
+  cwd_source_dir="${SAMPLE_TMPDIR}/cwd-source"
+  cwd_output_dir="${SAMPLE_TMPDIR}/cwd-output"
+  cwd_json_file="${SAMPLE_TMPDIR}/cwd-samples.json"
+
+  mkdir -p "${cwd_source_dir}/handovers"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${cwd_source_dir}/handovers/"
+
+  run bash -lc 'cd "$1" && "$2" --source-dir handovers --output-dir "$3" --date 2026-03-08 > "$4"' _ \
+    "${cwd_source_dir}" "${SAMPLE_SCRIPT}" "${cwd_output_dir}" "${cwd_json_file}"
+  [ "$status" -eq 0 ]
+
+  run jq -e '(.samples | length) >= 3' "${cwd_json_file}"
+  [ "$status" -eq 0 ]
+}
+
+handover_samples_rejects_non_integer_version() { # @test
+  local bad_version_dir
+
+  bad_version_dir="${SAMPLE_TMPDIR}/bad-version-source"
+  mkdir -p "${bad_version_dir}"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${bad_version_dir}/"
+
+  jq '.version = 2.5' \
+    "${bad_version_dir}/ws-issue10_t2_docs.json" > "${bad_version_dir}/ws-issue10_t2_docs.json.tmp"
+  mv "${bad_version_dir}/ws-issue10_t2_docs.json.tmp" "${bad_version_dir}/ws-issue10_t2_docs.json"
+
+  run "${SAMPLE_SCRIPT}" --source-dir "${bad_version_dir}" --output-dir "${SAMPLE_TMPDIR}/bad-version-output" --date "2026-03-08"
+  [ "$status" -ne 0 ]
+  [[ "${output}" == *"invalid handover sample"* ]]
+}
+
+handover_samples_rejects_negative_version() { # @test
+  local neg_version_dir
+
+  neg_version_dir="${SAMPLE_TMPDIR}/neg-version-source"
+  mkdir -p "${neg_version_dir}"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${neg_version_dir}/"
+
+  jq '.version = -1' \
+    "${neg_version_dir}/ws-issue10_t2_docs.json" > "${neg_version_dir}/ws-issue10_t2_docs.json.tmp"
+  mv "${neg_version_dir}/ws-issue10_t2_docs.json.tmp" "${neg_version_dir}/ws-issue10_t2_docs.json"
+
+  run "${SAMPLE_SCRIPT}" --source-dir "${neg_version_dir}" --output-dir "${SAMPLE_TMPDIR}/neg-version-output" --date "2026-03-08"
+  [ "$status" -ne 0 ]
+  [[ "${output}" == *"invalid handover sample"* ]]
+}

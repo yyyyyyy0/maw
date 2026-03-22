@@ -94,7 +94,7 @@ resolve_source_dir() {
   if [[ -n "${SOURCE_DIR}" ]]; then
     case "${SOURCE_DIR}" in
       /*) ;;
-      *) SOURCE_DIR="${REPO_ROOT}/${SOURCE_DIR}" ;;
+      *) SOURCE_DIR="$(cd "${SOURCE_DIR}" && pwd)" || fail "source dir not found: ${SOURCE_DIR}" ;;
     esac
     [[ -d "${SOURCE_DIR}" ]] || fail "source dir not found: ${SOURCE_DIR}"
     case "${SOURCE_DIR}" in
@@ -133,7 +133,7 @@ validate_source_handover() {
 
   jq -e '
     type == "object" and
-    (.version | type == "number") and
+    (.version | type == "number" and . == floor and . > 0) and
     (.branch | type == "string") and
     (.branch != "") and
     (.agent | type == "string") and
