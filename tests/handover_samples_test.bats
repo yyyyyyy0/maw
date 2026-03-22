@@ -373,3 +373,50 @@ handover_samples_rejects_negative_version() { # @test
   [ "$status" -ne 0 ]
   [[ "${output}" == *"invalid handover sample"* ]]
 }
+
+handover_samples_rejects_scalar_blocked_by() { # @test
+  local bad_blocked_dir
+
+  bad_blocked_dir="${SAMPLE_TMPDIR}/bad-blocked-source"
+  mkdir -p "${bad_blocked_dir}"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${bad_blocked_dir}/"
+
+  jq '.blocked_by = "oops"' \
+    "${bad_blocked_dir}/ws-issue10_t2_docs.json" > "${bad_blocked_dir}/ws-issue10_t2_docs.json.tmp"
+  mv "${bad_blocked_dir}/ws-issue10_t2_docs.json.tmp" "${bad_blocked_dir}/ws-issue10_t2_docs.json"
+
+  run "${SAMPLE_SCRIPT}" --source-dir "${bad_blocked_dir}" --output-dir "${SAMPLE_TMPDIR}/bad-blocked-output" --date "2026-03-08"
+  [ "$status" -ne 0 ]
+  [[ "${output}" == *"invalid handover sample"* ]]
+}
+
+handover_samples_rejects_numeric_blocked_by_entries() { # @test
+  local bad_entries_dir
+
+  bad_entries_dir="${SAMPLE_TMPDIR}/bad-entries-source"
+  mkdir -p "${bad_entries_dir}"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${bad_entries_dir}/"
+
+  jq '.blocked_by = [42]' \
+    "${bad_entries_dir}/ws-issue10_t2_docs.json" > "${bad_entries_dir}/ws-issue10_t2_docs.json.tmp"
+  mv "${bad_entries_dir}/ws-issue10_t2_docs.json.tmp" "${bad_entries_dir}/ws-issue10_t2_docs.json"
+
+  run "${SAMPLE_SCRIPT}" --source-dir "${bad_entries_dir}" --output-dir "${SAMPLE_TMPDIR}/bad-entries-output" --date "2026-03-08"
+  [ "$status" -ne 0 ]
+  [[ "${output}" == *"invalid handover sample"* ]]
+}
+
+handover_samples_preserves_unrelated_files_in_output_dir() { # @test
+  local preserve_output_dir
+
+  preserve_output_dir="${SAMPLE_TMPDIR}/preserve-output"
+  mkdir -p "${preserve_output_dir}/handovers"
+  echo "keep me" > "${preserve_output_dir}/handovers/README.md"
+
+  run "${SAMPLE_SCRIPT}" --source-dir "${SOURCE_FIXTURE_DIR}" --output-dir "${preserve_output_dir}" --date "2026-03-08"
+  [ "$status" -eq 0 ]
+
+  [ -f "${preserve_output_dir}/handovers/README.md" ]
+  [ "$(cat "${preserve_output_dir}/handovers/README.md")" = "keep me" ]
+  [ -f "${preserve_output_dir}/handovers/ws-issue10_t2_docs.json" ]
+}

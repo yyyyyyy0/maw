@@ -148,7 +148,11 @@ validate_source_handover() {
     (.workspace | type == "string") and
     (.workspace != "") and
     (.verification_status | type == "string") and
-    (.verification_status != "")
+    (.verification_status != "") and
+    (if has("blocked_by") then
+      (.blocked_by | type == "array") and
+      all(.blocked_by[]; type == "string" or type == "object")
+    else true end)
   ' "${json_file}" >/dev/null 2>&1 || fail "invalid handover sample: ${rel_ref}"
 }
 
@@ -196,8 +200,11 @@ copy_sample_files() {
     mv "${tmp_file}" "${staging_dir}/${sample}"
   done
 
-  rm -rf "${target_dir}"
-  mv "${staging_dir}" "${target_dir}"
+  mkdir -p "${target_dir}"
+  for sample in "${SAMPLE_FILES[@]}"; do
+    mv "${staging_dir}/${sample}" "${target_dir}/${sample}"
+  done
+  rm -rf "${staging_dir}"
 }
 
 build_summary_json() {
