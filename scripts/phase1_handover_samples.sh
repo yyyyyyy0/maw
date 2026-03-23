@@ -142,7 +142,7 @@ validate_source_handover() {
 
   jq -e '
     type == "object" and
-    (.version | type == "number" and . == floor and . > 0) and
+    (.version | type == "number" and . == floor and . >= 2) and
     (.branch | type == "string") and
     (.branch != "") and
     (.agent | type == "string") and

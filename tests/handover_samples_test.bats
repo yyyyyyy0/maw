@@ -445,3 +445,19 @@ handover_samples_falls_back_when_operational_dir_lacks_samples() { # @test
   ' "${temp_json}"
   [ "$status" -eq 0 ]
 }
+
+handover_samples_rejects_v1_bundles() { # @test
+  local v1_source_dir
+
+  v1_source_dir="${SAMPLE_TMPDIR}/v1-source"
+  mkdir -p "${v1_source_dir}"
+  cp "${SOURCE_FIXTURE_DIR}/"*.json "${v1_source_dir}/"
+
+  jq '.version = 1' \
+    "${v1_source_dir}/ws-issue10_t2_docs.json" > "${v1_source_dir}/ws-issue10_t2_docs.json.tmp"
+  mv "${v1_source_dir}/ws-issue10_t2_docs.json.tmp" "${v1_source_dir}/ws-issue10_t2_docs.json"
+
+  run "${SAMPLE_SCRIPT}" --source-dir "${v1_source_dir}" --output-dir "${SAMPLE_TMPDIR}/v1-output" --date "2026-03-08"
+  [ "$status" -ne 0 ]
+  [[ "${output}" == *"invalid handover sample"* ]]
+}
