@@ -103,7 +103,24 @@ dir_validates_all_samples() {
   local dir="$1"
   local sample=""
   for sample in "${SAMPLE_FILES[@]}"; do
-    validate_handover_bundle "${dir}/${sample}" >/dev/null 2>&1 || return 1
+    local file="${dir}/${sample}"
+    validate_handover_bundle "${file}" >/dev/null 2>&1 || return 1
+    jq -e '
+      type == "object" and
+      (.version | type == "number" and . == floor and . >= 2) and
+      (.branch | type == "string" and . != "") and
+      (.agent | type == "string" and . != "") and
+      (.state | type == "string" and . != "") and
+      (.summary | type == "string" and . != "") and
+      (.evidence_refs | type == "array" and length >= 1) and
+      all(.evidence_refs[]; type == "string" and . != "") and
+      (.workspace | type == "string" and . != "") and
+      (.verification_status | type == "string" and . != "") and
+      (if has("blocked_by") then
+        (.blocked_by | type == "array") and
+        all(.blocked_by[]; type == "string" or (type == "object" and (.type | . == "blocker" or . == "dependency" or . == "issue")))
+      else true end)
+    ' "${file}" >/dev/null 2>&1 || return 1
   done
   return 0
 }
