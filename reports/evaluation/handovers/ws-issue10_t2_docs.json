@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "workspace": "issue10_t2_docs",
+  "branch": "worker/issue-10-issue10_t2_docs",
+  "agent": "worker",
+  "state": "clean",
+  "summary": "Issue 10 T2 docs: fixed the public doctor --json contract in commands and CI docs, including a new English doctor-ci guide",
+  "evidence_refs": [
+    "docs:docs/ja/commands.md",
+    "docs:docs/en/commands.md",
+    "docs:docs/ja/doctor-ci.md",
+    "docs:docs/en/doctor-ci.md"
+  ],
+  "verification_status": "skipped",
+  "blocked_by": []
+}
