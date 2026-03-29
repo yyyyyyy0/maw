@@ -99,6 +99,15 @@ dir_has_all_samples() {
   return 0
 }
 
+dir_validates_all_samples() {
+  local dir="$1"
+  local sample=""
+  for sample in "${SAMPLE_FILES[@]}"; do
+    validate_handover_bundle "${dir}/${sample}" >/dev/null 2>&1 || return 1
+  done
+  return 0
+}
+
 resolve_source_dir() {
   if [[ -n "${SOURCE_DIR}" ]]; then
     case "${SOURCE_DIR}" in
@@ -118,7 +127,7 @@ resolve_source_dir() {
   fi
 
   local operational_source_dir="${REPO_ROOT}/.maw/handovers"
-  if [[ -d "${operational_source_dir}" ]] && dir_has_all_samples "${operational_source_dir}"; then
+  if [[ -d "${operational_source_dir}" ]] && dir_has_all_samples "${operational_source_dir}" && dir_validates_all_samples "${operational_source_dir}"; then
     SOURCE_DIR="${operational_source_dir}"
     SOURCE_REF_PREFIX=".maw/handovers"
     return 0
@@ -160,7 +169,7 @@ validate_source_handover() {
     (.verification_status != "") and
     (if has("blocked_by") then
       (.blocked_by | type == "array") and
-      all(.blocked_by[]; type == "string" or type == "object")
+      all(.blocked_by[]; type == "string" or (type == "object" and (.type | . == "blocker" or . == "dependency" or . == "issue")))
     else true end)
   ' "${json_file}" >/dev/null 2>&1 || fail "invalid handover sample: ${rel_ref}"
 }
